@@ -2,6 +2,7 @@
 
 from scipy.stats import norm
 import numpy as np
+from numpy.random import binomial
 from numpy.linalg import inv
 
 class VAMP:
@@ -57,7 +58,9 @@ class VAMP:
             print("...LMMSE")
             A = inv(gamw * R + gam2 * I)
             xhat2 = A @ (gamw * r + gam2 * r2)
-            alpha2 = gam2 * np.trace(A) / M
+            u = binomial(p=1/2, n=1, size=M) * 2 - 1 # Generate iid random vector [-1,1] of size M
+            Atrace = u.T @ A @ u # Hutchinson trace estimator
+            alpha2 = gam2 * Atrace / M
             gam1 = gam2 * (1 - alpha2) / alpha2
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
 
