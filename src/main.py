@@ -2,6 +2,7 @@ from sgvamp import VAMP
 import numpy as np
 from numpy.linalg import norm
 from sklearn.metrics import r2_score
+import time
 
 # Test run for sgvamp
 print("...Test run of VAMP for summary statistics\n")
@@ -37,8 +38,13 @@ sgvamp = VAMP(lam=lam, rho=0.5, gam1=100, gamw=1/h2)
 
 # Inference
 print("...Running sgVAMP\n")
+ts = time.time()
 xhat1 = sgvamp.infer(R, r, iterations)
 print("\n")
+te = time.time()
+
+# Print running time
+print("sgVAMP total running time: %0.4fs \n" % (te - ts))
 
 # Print metrics
 R2s = []
