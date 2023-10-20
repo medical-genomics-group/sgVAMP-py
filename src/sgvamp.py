@@ -38,6 +38,7 @@ class VAMP:
         rho=self.rho
         gamw = self.gamw
         xhat1s = []
+        I = np.identity(M) # Identity matrix
 
         for it in range(iterations):
             print("-----ITERATION %d -----"%(it))
@@ -54,8 +55,9 @@ class VAMP:
 
             # LMMSE
             print("...LMMSE")
-            xhat2 = inv(gamw * R + gam2 * np.identity(M)) @ (gamw * r + gam2 * r2)
-            alpha2 = gam2 * np.trace(inv(gamw * R + gam2 * np.identity(M))) / M
+            A = inv(gamw * R + gam2 * I)
+            xhat2 = A @ (gamw * r + gam2 * r2)
+            alpha2 = gam2 * np.trace(A) / M
             gam1 = gam2 * (1 - alpha2) / alpha2
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
 
