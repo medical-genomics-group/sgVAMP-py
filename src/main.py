@@ -1,5 +1,6 @@
 from sgvamp import VAMP
 import numpy as np
+from numpy.linalg import norm
 from sklearn.metrics import r2_score
 
 # Test run for sgvamp
@@ -39,11 +40,15 @@ print("...Running sgVAMP\n")
 xhat1 = sgvamp.infer(R, r, iterations)
 print("\n")
 
-# Print R2
+# Print metrics
 R2s = []
+corrs = []
 for it in range(iterations):
     yhat = X @ xhat1[it]
-    R2 = r2_score(y, yhat)
+    R2 = r2_score(y, yhat) # R squared metric
     R2s.append(R2)
+
+    corr = np.corrcoef(xhat1[it].squeeze(), beta.squeeze()) # Pearson correlation coefficient of xhat1 and true signal beta
+    corrs.append(corr[0,-1])
 print("R2 over iterations: \n", R2s)
-    
+print("Corr(x1hat,beta) over iterations: \n", corrs)
