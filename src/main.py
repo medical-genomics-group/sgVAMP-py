@@ -3,16 +3,26 @@ import numpy as np
 from numpy.linalg import norm
 from sklearn.metrics import r2_score
 import time
+import argparse
 
 # Test run for sgvamp
 print("...Test run of VAMP for summary statistics\n")
 
-# Initialization
-N = 1000 # Number of samples
-M = 2000 # Number of markers
-iterations = 10
-h2 = 0.8 # heritability for simulations
-lam = 0.5 # Sparsity for simulations
+# Initialize parser
+parser = argparse.ArgumentParser()
+parser.add_argument("-N", "--N", help = "Number of samples")
+parser.add_argument("-M", "--M", help = "Number of markers")
+parser.add_argument("-iterations", "--iterations", help = "Number of iterations", default=10)
+parser.add_argument("-h2", "--h2", help = "Heritability used in simulations", default=0.5)
+parser.add_argument("-lam", "--lam", help = "Sparsity (lambda) used in simulations", default=0.5)
+args = parser.parse_args()
+
+# Input parameters
+M = int(args.M) # Number of markers
+N = int(args.N) # Number of samples
+iterations = int(args.iterations)
+h2 = float(args.h2) # heritability for simulations
+lam = float(args.lam) # Sparsity for simulations
 
 # Simmulations
 print("...Simulating data\n")
