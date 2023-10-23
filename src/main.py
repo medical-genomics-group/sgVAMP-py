@@ -29,6 +29,8 @@ print("Var(y) =", np.var(y))
 print("h2 =", np.var(g) / np.var(y))
 print("\n")
 
+y = (y - np.mean(y)) / np.std(y) # y standardization
+
 # TODO Here we should load LD matrix
 R = X.T @ X
 r = X.T @ y
@@ -39,7 +41,7 @@ sgvamp = VAMP(lam=lam, rho=0.5, gam1=100, gamw=1/h2)
 # Inference
 print("...Running sgVAMP\n")
 ts = time.time()
-xhat1 = sgvamp.infer(R, r, iterations)
+xhat1, gamw = sgvamp.infer(R, r, M, N, iterations, est=False)
 print("\n")
 te = time.time()
 
@@ -58,3 +60,4 @@ for it in range(iterations):
     corrs.append(corr[0,-1])
 print("R2 over iterations: \n", R2s)
 print("Corr(x1hat,beta) over iterations: \n", corrs)
+print("gamw over iterations: \n", gamw)

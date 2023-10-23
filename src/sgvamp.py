@@ -28,9 +28,7 @@ class VAMP:
         ratio = gam1 / (gam1 + 1.0) * B / (A + B) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
         return ratio
 
-    def infer(self,R,r,iterations):
-        [M,M] = np.shape(R)
-        [N,_] = np.shape(r)
+    def infer(self,R,r,M,N,iterations,est=True):
 
         # initialization
         r1 = np.zeros((M,1))
@@ -40,6 +38,7 @@ class VAMP:
         gamw = self.gamw
         xhat1s = []
         I = np.identity(M) # Identity matrix
+        gamws = []
 
         for it in range(iterations):
             print("-----ITERATION %d -----"%(it))
@@ -59,9 +58,22 @@ class VAMP:
             A = inv(gamw * R + gam2 * I)
             xhat2 = A @ (gamw * r + gam2 * r2)
             u = binomial(p=1/2, n=1, size=M) * 2 - 1 # Generate iid random vector [-1,1] of size M
-            Atrace = u.T @ A @ u # Hutchinson trace estimator
+            if est:
+                Atrace = u.T @ A @ u # Hutchinson trace estimator
+            else:
+                Atrace = np.trace(A) # True A trace
             alpha2 = gam2 * Atrace / M
             gam1 = gam2 * (1 - alpha2) / alpha2
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
+            z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
+            if est:
+                RAtrace = u.T @ R @ (A @ u) # Hutchinson trace estimator
+            else:
+                RAtrace = np.trace(R @ A) # True R @ A trace
 
-        return xhat1s
+            # Update noise precison
+            gamw = 1 / (z / N + RAtrace / N)
+            gamw = float(gamw.squeeze())
+            gamws.append(gamw)
+
+        return xhat1s, gamws
