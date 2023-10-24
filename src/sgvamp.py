@@ -41,9 +41,9 @@ class VAMP:
         gamws = []
 
         for it in range(iterations):
-            print("-----ITERATION %d -----"%(it))
+            print("-----ITERATION %d -----"%(it), flush=True)
             # Denoising
-            print("...Denoising")
+            print("...Denoising", flush=True)
             xhat1_prev = xhat1
             vect_den_beta = lambda x: self.denoiser(x, gam1)
             xhat1 = vect_den_beta(r1)
@@ -54,7 +54,7 @@ class VAMP:
             r2 = (xhat1 - alpha1 * r1) / (1 - alpha1)
 
             # LMMSE
-            print("...LMMSE")
+            print("...LMMSE", flush=True)
             A = inv(gamw * R + gam2 * I)
             xhat2 = A @ (gamw * r + gam2 * r2)
             u = binomial(p=1/2, n=1, size=M) * 2 - 1 # Generate iid random vector [-1,1] of size M
