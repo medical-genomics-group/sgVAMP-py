@@ -4,6 +4,7 @@ from scipy.stats import norm
 import numpy as np
 from numpy.random import binomial
 from numpy.linalg import inv
+from scipy.sparse.linalg import cg as con_grad
 
 class VAMP:
     def __init__(self, rho, lam, gamw, gam1):
@@ -28,7 +29,7 @@ class VAMP:
         ratio = gam1 / (gam1 + 1.0) * B / (A + B) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
         return ratio
 
-    def infer(self,R,r,M,N,iterations,est=True):
+    def infer(self,R,r,M,N,iterations,est=True,cg=True):
 
         # initialization
         r1 = np.zeros((M,1))
@@ -55,21 +56,25 @@ class VAMP:
 
             # LMMSE
             print("...LMMSE", flush=True)
-            A = inv(gamw * R + gam2 * I)
-            xhat2 = A @ (gamw * r + gam2 * r2)
+            A = (gamw * R + gam2 * I)
+            b = (gamw * r + gam2 * r2)
+            xhat2, ret = con_grad(A, b) # Conjugate gradient for solving linear system
+            xhat2.resize((M,1))
+
             u = binomial(p=1/2, n=1, size=M) * 2 - 1 # Generate iid random vector [-1,1] of size M
             if est:
-                Atrace = u.T @ A @ u # Hutchinson trace estimator
+                invAu, ret = con_grad(A,u)
+                Atrace = u.T @ invAu # Hutchinson trace estimator
             else:
-                Atrace = np.trace(A) # True A trace
+                Atrace = np.trace(inv(A)) # True A trace
             alpha2 = gam2 * Atrace / M
             gam1 = gam2 * (1 - alpha2) / alpha2
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
             z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
             if est:
-                RAtrace = u.T @ R @ (A @ u) # Hutchinson trace estimator
+                RAtrace = u.T @ R @ invAu # Hutchinson trace estimator
             else:
-                RAtrace = np.trace(R @ A) # True R @ A trace
+                RAtrace = np.trace(R @ inv(A)) # True R @ A trace
 
             # Update noise precison
             gamw = 1 / (z / N + RAtrace / N)
