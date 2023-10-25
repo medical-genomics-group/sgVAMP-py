@@ -38,6 +38,9 @@ col_len_byte = N / 4 # One byte contatins genotype information of 4 individuals
 if N % 4:
     col_len_byte = N / 4 + 1 
 
+# for computing marker means
+mrk_means = np.zeros(M)
+
 for j in range(M):
     for i in range(N):
         c = int(i / 4)
@@ -54,8 +57,17 @@ for j in range(M):
         elif not bit0 and bit1: # 10 Heterozygous
             X[i,j] = 1
         else: # 01 Missing genotype
-            X[i,j] = 0 # TODO aproximate missing values
+            X[i,j] = None # TODO aproximate missing values
+        if X[i,j] is not None:
+            mrk_means[j] += X[i,j]
+    mrk_means[j] /= N
 f.close()
+
+# repleace None values by marker mean
+for j in range(M):
+    for i in range(N):
+        if X[i,j] is None:
+            X[i,j] = mrk_means[j]
 
 # Standardization
 X = (X - np.mean(X,axis=0)) / np.std(X, axis=0) 
