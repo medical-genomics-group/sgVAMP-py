@@ -58,23 +58,40 @@ class VAMP:
             print("...LMMSE", flush=True)
             A = (gamw * R + gam2 * I) # Sigma2 = A^(-1)
             mu2 = (gamw * r + gam2 * r2)
-            xhat2, ret = con_grad(A, mu2) # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
-            xhat2.resize((M,1))
+            
+            if not cg or not est: 
+                Sigma2 = inv(A) # Precompute A^(-1) if needed
 
-            u = binomial(p=1/2, n=1, size=M) * 2 - 1 # Generate iid random vector [-1,1] of size M
+            if cg:
+                # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
+                xhat2, ret = con_grad(A, mu2) 
+                xhat2.resize((M,1))
+            else:
+                # True inverse
+                xhat2 = Sigma2 @ mu2
+
+            # Generate iid random vector [-1,1] of size M
+            u = binomial(p=1/2, n=1, size=M) * 2 - 1
+
             if est:
                 # Hutchinson trace estimator
                 # Sigma2 = (gamw * R + gam2 * I)^(-1)
-                Sigma2_u, ret = con_grad(A,u) # Conjugate gradient for solving linear system (gamw * R + gam2 * I)^(-1) @ u
-                TrSigma2 = u.T @ Sigma2_u # u^T @ Sigma2 @ u 
+                if cg:
+                    # Conjugate gradient for solving linear system (gamw * R + gam2 * I)^(-1) @ u
+                    Sigma2_u, ret = con_grad(A,u)
+                else:
+                    # True inverse
+                    Sigma2_u = Sigma2 @ u
+                TrSigma2 = u.T @ Sigma2_u # Tr[Sigma2] = u^T @ Sigma2 @ u 
             else:
                 # True trace computation
-                Sigma2 = inv(A)
                 TrSigma2 = np.trace(Sigma2)
+
             alpha2 = gam2 * TrSigma2 / M
             gam1 = gam2 * (1 - alpha2) / alpha2
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
             z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
+
             if est:
                 # Hutchinson trace estimator
                 TrRSigma2 = u.T @ R @ Sigma2_u # u^T @ R @ [(gamw * R + gam2 * I)^(-1) @ u]
