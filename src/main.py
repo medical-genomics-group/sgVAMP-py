@@ -19,6 +19,7 @@ parser.add_argument("-M", "--M", help = "Number of markers")
 parser.add_argument("-iterations", "--iterations", help = "Number of iterations", default=10)
 parser.add_argument("-h2", "--h2", help = "Heritability used in simulations", default=0.8)
 parser.add_argument("-lam", "--lam", help = "Sparsity (lambda) used in simulations", default=0.5)
+parser.add_argument("-ld_format", "--ld-format", help = "LD matrix format (npy or npz)", default='npz')
 args = parser.parse_args()
 
 # Input parameters
@@ -30,10 +31,16 @@ N = int(args.N) # Number of samples
 iterations = int(args.iterations)
 h2 = float(args.h2) # heritability for simulations
 lam = float(args.lam) # Sparsity for simulations
+ld_format = args.ld_format # npy or npz
 
 # Loading LD matrix and XTy vector
 print("...loading LD matrix and XTy vector", flush=True)
-R = scipy.sparse.load_npz(ld_fpath).toarray()
+if ld_format == 'npz':
+    R = scipy.sparse.load_npz(ld_fpath).toarray()
+elif ld_format == 'npy':
+    R = np.load(ld_fpath)
+else:
+    raise Exception("Unsupported LD format!")
 r = np.load(r_fpath)
 print("LD matrix and XTy loaded. Shapes: ", R.shape, r.shape, flush=True)
 
@@ -47,7 +54,7 @@ sgvamp = VAMP(lam=lam, rho=0.5, gam1=100, gamw=1/h2)
 # Inference
 print("...Running sgVAMP\n", flush=True)
 ts = time.time()
-xhat1, gamw = sgvamp.infer(R, r, M, N, iterations, est=True)
+xhat1, gamw = sgvamp.infer(R, r, M, N, iterations, est=True, cg=True)
 print("\n")
 te = time.time()
 
