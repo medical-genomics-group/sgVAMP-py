@@ -18,4 +18,4 @@ source $VENV/bin/activate
 module load python/3.10.6
 module load openmpi/4.1.4
 
-srun python3 diff.py
+srun python3 ld_matrix_dif.py
