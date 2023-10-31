@@ -29,7 +29,7 @@ class VAMP:
         ratio = gam1 / (gam1 + 1.0) * B / (A + B) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
         return ratio
 
-    def infer(self,R,r,M,N,iterations,est=True,cg=True):
+    def infer(self,R,r,M,N,iterations,est=True,cg=True,cg_maxit=500):
 
         # initialization
         r1 = np.zeros((M,1))
@@ -64,7 +64,8 @@ class VAMP:
 
             if cg:
                 # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
-                xhat2, ret = con_grad(A, mu2) 
+                xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit)
+                if ret > 0: print("WARNING: CG convergence after %d iterations not achieved!" % ret)
                 xhat2.resize((M,1))
             else:
                 # True inverse
@@ -78,7 +79,8 @@ class VAMP:
                 # Sigma2 = (gamw * R + gam2 * I)^(-1)
                 if cg:
                     # Conjugate gradient for solving linear system (gamw * R + gam2 * I)^(-1) @ u
-                    Sigma2_u, ret = con_grad(A,u)
+                    Sigma2_u, ret = con_grad(A,u, maxiter=cg_maxit)
+                    if ret > 0: print("WARNING: CG convergence after %d iterations not achieved!" % ret)
                 else:
                     # True inverse
                     Sigma2_u = Sigma2 @ u
