@@ -1,6 +1,7 @@
 import numpy as np
 import argparse
 import struct
+import random
 
 # Phenotype simulation on the top of real data
 print("...Phenotype simulation for sgVAMP\n")
@@ -71,12 +72,14 @@ for j in range(M):
 
 # Standardization
 X = (X - np.mean(X,axis=0)) / np.std(X, axis=0) 
-X /= np.sqrt(N)
 
 # Simulating phenotype
 print("...Simulating phenotype\n")
-beta = np.random.normal(loc=0.0, scale=1.0, size=[M,1]) # scale = standard deviation
-beta *= np.random.binomial(1, lam, size=[M,1])
+cm = int(M * lam) # Number of causal markers
+bvar = 1 / cm # beta variance
+idx = random.sample(range(M), cm) # indices of causal markers
+beta = np.zeros((M,1)) # true signals beta
+beta[idx,0] = np.random.normal(0,np.sqrt(bvar),cm)
 g = X @ beta
 print("Var(g) =", np.var(g))
 w = np.random.normal(loc=0.0, scale=np.sqrt(1/h2 - 1), size=[N,1])
@@ -87,7 +90,8 @@ print("\n")
 
 y = (y - np.mean(y)) / np.std(y) # y standardization
 
-r = X.T @ y
+X /= np.sqrt(N) # normalization
+r = X.T @ y # marginal estimate vector
 
 np.save(outpath + "_phen.npy", y) # save phenotype y
 np.save(outpath + "_bet.npy", beta) # save true signal
