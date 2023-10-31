@@ -4,7 +4,7 @@ import struct
 import random
 
 # Phenotype simulation on the top of real data
-print("...Phenotype simulation for sgVAMP\n")
+print("...Phenotype simulation for sgVAMP\n", flush=True)
 
 # Initialize parser
 parser = argparse.ArgumentParser()
@@ -25,7 +25,7 @@ h2 = float(args.h2) # heritability for simulations
 lam = float(args.lam) # Sparsity for simulations
 
 # Reading data from bed file
-print("...Reading data from bed file %s\n" % bed_fpath)
+print("...Reading data from bed file %s\n" % bed_fpath, flush=True)
 
 # Load X matrix from bed file
 X = np.zeros((N,M))
@@ -74,7 +74,7 @@ for j in range(M):
 X = (X - np.mean(X,axis=0)) / np.std(X, axis=0) 
 
 # Simulating phenotype
-print("...Simulating phenotype\n")
+print("...Simulating phenotype\n", flush=True)
 cm = int(M * lam) # Number of causal markers
 bvar = 1 / cm # beta variance
 idx = random.sample(range(M), cm) # indices of causal markers
@@ -86,7 +86,7 @@ w = np.random.normal(loc=0.0, scale=np.sqrt(1/h2 - 1), size=[N,1])
 y = g + w
 print("Var(y) =", np.var(y))
 print("h2 =", np.var(g) / np.var(y))
-print("\n")
+print("\n", flush=True)
 
 y = (y - np.mean(y)) / np.std(y) # y standardization
 
