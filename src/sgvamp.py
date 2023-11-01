@@ -34,12 +34,15 @@ class VAMP:
         # initialization
         r1 = np.zeros((M,1))
         xhat1 = np.zeros((M,1)) # signal estimates in Denoising step
+        xhat2 = np.zeros((M,1)) # signal estimates in LMMSE step
         gam1 = self.gam1
         rho = self.rho # Damping factor
         gamw = self.gamw # Precision of noise
         xhat1s = []
         I = np.identity(M) # Identity matrix
         gamws = []
+        alpha1 = 0
+        alpha2 = 0
 
         for it in range(iterations):
             print("-----ITERATION %d -----"%(it), flush=True)
