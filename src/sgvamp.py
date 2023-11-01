@@ -28,7 +28,7 @@ class VAMP:
         BoverAplusBder = ( Bder * A - Ader * B ) / (A+B) / (A+B)
         ratio = gam1 / (gam1 + 1.0) * B / (A + B) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
         return ratio
-
+    
     def infer(self,R,r,M,N,iterations,est=True,cg=True,cg_maxit=500):
 
         # initialization
@@ -46,16 +46,20 @@ class VAMP:
             # Denoising
             print("...Denoising", flush=True)
             xhat1_prev = xhat1
+            alpha1_prev = alpha1
             vect_den_beta = lambda x: self.denoiser(x, gam1)
             xhat1 = vect_den_beta(r1)
             xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
             xhat1s.append(xhat1)
             alpha1 = np.mean( self.der_denoiser(r1, gam1) )
+            alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
             gam2 = gam1 * (1 - alpha1) / alpha1
             r2 = (xhat1 - alpha1 * r1) / (1 - alpha1)
 
             # LMMSE
             print("...LMMSE", flush=True)
+            xhat2_prev = xhat2
+            alpha2_prev = alpha2
             A = (gamw * R + gam2 * I) # Sigma2 = A^(-1)
             mu2 = (gamw * r + gam2 * r2)
             
@@ -70,6 +74,8 @@ class VAMP:
             else:
                 # True inverse
                 xhat2 = Sigma2 @ mu2
+
+            xhat2 = rho * xhat2 + (1 - rho) * xhat2_prev # damping on xhat2
 
             # Generate iid random vector [-1,1] of size M
             u = binomial(p=1/2, n=1, size=M) * 2 - 1
@@ -90,6 +96,7 @@ class VAMP:
                 TrSigma2 = np.trace(Sigma2)
 
             alpha2 = gam2 * TrSigma2 / M
+            alpha2 = rho * alpha2 + (1 - rho) * alpha2_prev # damping on alpha2
             gam1 = gam2 * (1 - alpha2) / alpha2
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
             z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
@@ -102,8 +109,10 @@ class VAMP:
                 TrRSigma2 = np.trace(R @ Sigma2) 
 
             # Update noise precison
+            gamw_prev = gamw
             gamw = 1 / (z / N + TrRSigma2 / N)
             gamw = float(gamw.squeeze())
+            gamw = rho * gamw + (1 - rho) * gamw_prev # damping on gamw
             gamws.append(gamw)
 
         return xhat1s, gamws
