@@ -19,6 +19,7 @@ parser.add_argument("-M", "--M", help = "Number of markers")
 parser.add_argument("-iterations", "--iterations", help = "Number of iterations", default=10)
 parser.add_argument("-h2", "--h2", help = "Heritability used in simulations", default=0.8)
 parser.add_argument("-lam", "--lam", help = "Sparsity (lambda) used in simulations", default=0.5)
+parser.add_argument("-rho", "--rho", help = "Damping factor rho", default=0.5)
 parser.add_argument("-ld_format", "--ld-format", help = "LD matrix format (npy or npz)", default='npz')
 args = parser.parse_args()
 
@@ -32,6 +33,7 @@ iterations = int(args.iterations)
 h2 = float(args.h2) # heritability for simulations
 lam = float(args.lam) # Sparsity for simulations
 ld_format = args.ld_format # npy or npz
+rho = float(args.rho) # damping
 
 # Loading LD matrix and XTy vector
 print("...loading LD matrix and XTy vector", flush=True)
@@ -49,7 +51,7 @@ beta = np.load(true_signal_fpath)
 print("True signals loaded. Shape: ", beta.shape, flush=True)
 
 # sgVAMP init
-sgvamp = VAMP(lam=lam, rho=0.5, gam1=100, gamw=1/h2)
+sgvamp = VAMP(lam=lam, rho=rho, gam1=100, gamw=1/(1-h2))
 
 # Inference
 print("...Running sgVAMP\n", flush=True)
