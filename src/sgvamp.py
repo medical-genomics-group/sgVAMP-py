@@ -29,7 +29,7 @@ class VAMP:
         ratio = gam1 / (gam1 + 1.0) * B / (A + B) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
         return ratio
     
-    def infer(self,R,r,M,N,iterations,est=True,cg=True,cg_maxit=500):
+    def infer(self,R,r,M,N,iterations,est=True,cg=True,cg_maxit=500,learn_gamw=True):
 
         # initialization
         r1 = np.zeros((M,1))
@@ -104,18 +104,19 @@ class VAMP:
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
             z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
 
-            if est:
-                # Hutchinson trace estimator
-                TrRSigma2 = u.T @ R @ Sigma2_u # u^T @ R @ [(gamw * R + gam2 * I)^(-1) @ u]
-            else:
-                # True trace computation
-                TrRSigma2 = np.trace(R @ Sigma2) 
+            if learn_gamw:
+                if est:
+                    # Hutchinson trace estimator
+                    TrRSigma2 = u.T @ R @ Sigma2_u # u^T @ R @ [(gamw * R + gam2 * I)^(-1) @ u]
+                else:
+                    # True trace computation
+                    TrRSigma2 = np.trace(R @ Sigma2) 
 
-            # Update noise precison
-            gamw_prev = gamw
-            gamw = 1 / (z / N + TrRSigma2 / N)
-            gamw = float(gamw.squeeze())
-            gamw = rho * gamw + (1 - rho) * gamw_prev # damping on gamw
+                # Update noise precison
+                gamw_prev = gamw
+                gamw = 1 / (z / N + TrRSigma2 / N)
+                gamw = float(gamw.squeeze())
+                gamw = rho * gamw + (1 - rho) * gamw_prev # damping on gamw
             gamws.append(gamw)
 
         return xhat1s, gamws
