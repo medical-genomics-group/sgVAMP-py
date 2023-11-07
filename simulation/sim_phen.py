@@ -75,20 +75,24 @@ X = (X - np.mean(X,axis=0)) / np.std(X, axis=0)
 
 # Simulating phenotype
 print("...Simulating phenotype\n", flush=True)
-cm = int(M * lam) # Number of causal markers
-bvar = 1 / cm # beta variance
-idx = random.sample(range(M), cm) # indices of causal markers
+CV = int(M * lam) # Number of causal markers
+print("Causal variants = %d" % CV)
+
+sigma2 = h2 / CV # beta variance
+idx = random.sample(range(M), CV) # indices of causal markers
 beta = np.zeros((M,1)) # true signals beta
-beta[idx,0] = np.random.normal(0,np.sqrt(bvar),cm)
+beta[idx,0] = np.random.normal(0, np.sqrt(sigma2), CV)
 g = X @ beta
 print("Var(g) =", np.var(g))
-w = np.random.normal(loc=0.0, scale=np.sqrt(1/h2 - 1), size=[N,1])
+gamw = 1 / (1 - h2)
+sigma2w = 1 / gamw
+w = np.random.normal(loc=0.0, scale=np.sqrt(sigma2w), size=[N,1])
 y = g + w
 print("Var(y) =", np.var(y))
 print("h2 =", np.var(g) / np.var(y))
 print("\n", flush=True)
 
-y = (y - np.mean(y)) / np.std(y) # y standardization
+#y = (y - np.mean(y)) / np.std(y) # y standardization
 
 X /= np.sqrt(N) # normalization
 r = X.T @ y # marginal estimate vector
