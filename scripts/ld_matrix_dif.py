@@ -35,7 +35,7 @@ We can standardize each marker, then compute XTX and divide by the number of mar
 
 X = (X - X.mean(axis=0))/X.std(axis=0)
 XTX = X.T.dot(X)
-N_arr = np.ones(XTX.shape[1])*XTX.shape[0]
+N_arr = np.ones(XTX.shape[1])*X.shape[0]
 XTX_norm = XTX/N_arr
 del XTX
 
