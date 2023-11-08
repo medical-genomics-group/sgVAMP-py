@@ -29,7 +29,7 @@ class VAMP:
         ratio = gam1 / (gam1 + 1.0) * B / (A + B) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
         return ratio
     
-    def infer(self,R,r,M,N,iterations,est=True,cg=True,cg_maxit=500,learn_gamw=True):
+    def infer(self,R,r,M,N,iterations,est=True,cg=True,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
 
         # initialization
         r1 = np.zeros((M,1))
@@ -78,7 +78,8 @@ class VAMP:
                 # True inverse
                 xhat2 = Sigma2 @ mu2
 
-            xhat2 = rho * xhat2 + (1 - rho) * xhat2_prev # damping on xhat2
+            if lmmse_damp:
+                xhat2 = rho * xhat2 + (1 - rho) * xhat2_prev # damping on xhat2
 
             # Generate iid random vector [-1,1] of size M
             u = binomial(p=1/2, n=1, size=M) * 2 - 1
@@ -99,7 +100,8 @@ class VAMP:
                 TrSigma2 = np.trace(Sigma2)
 
             alpha2 = gam2 * TrSigma2 / M
-            alpha2 = rho * alpha2 + (1 - rho) * alpha2_prev # damping on alpha2
+            if lmmse_damp:
+                alpha2 = rho * alpha2 + (1 - rho) * alpha2_prev # damping on alpha2
             gam1 = gam2 * (1 - alpha2) / alpha2
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
             z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
