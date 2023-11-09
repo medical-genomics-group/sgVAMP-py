@@ -20,6 +20,8 @@ parser.add_argument("-iterations", "--iterations", help = "Number of iterations"
 parser.add_argument("-gamw", "--gamw", help = "Initial noise precision", default=5)
 parser.add_argument("-gam1", "--gam1", help = "Initial signal precision", default=100)
 parser.add_argument("-lam", "--lam", help = "Initial sparsity", default=0.5)
+parser.add_argument("-lmmse_damp", "--lmmse-damp", help = "Use LMMSE damping", default=True)
+parser.add_argument("-learn_gamw", "--learn-gamw", help = "Learn or fix gamw", default=True)
 parser.add_argument("-rho", "--rho", help = "Damping factor rho", default=0.5)
 parser.add_argument("-ld_format", "--ld-format", help = "LD matrix format (npy or npz)", default='npz')
 args = parser.parse_args()
@@ -36,7 +38,15 @@ gam1 = float(args.gam1) # initial signal precision
 lam = float(args.lam) # Sparsity for simulations
 ld_format = args.ld_format # npy or npz
 rho = float(args.rho) # damping
+lmmse_damp = bool(int(args.lmmse_damp)) # damping
+learn_gamw = bool(int(args.learn_gamw)) # wheter to learn or not gamw
 
+print("--ld-file", ld_fpath)
+print("--lmmse-damp", lmmse_damp)
+print("--learn-gamw", learn_gamw)
+print("\n", flush=True)
+
+rho = float(args.rho) # damping
 # Loading LD matrix and XTy vector
 print("...loading LD matrix and XTy vector", flush=True)
 if ld_format == 'npz':
@@ -58,7 +68,7 @@ sgvamp = VAMP(lam=lam, rho=rho, gam1=gam1, gamw=gamw)
 # Inference
 print("...Running sgVAMP\n", flush=True)
 ts = time.time()
-xhat1, gamw = sgvamp.infer(R, r, M, N, iterations, est=True, cg=True)
+xhat1, gamw = sgvamp.infer(R, r, M, N, iterations, est=True, cg=True, learn_gamw=learn_gamw, lmmse_damp=lmmse_damp)
 print("\n")
 te = time.time()
 
