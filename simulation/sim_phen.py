@@ -2,6 +2,7 @@ import numpy as np
 import argparse
 import struct
 import random
+from bed_reader import open_bed, sample_file
 
 # Phenotype simulation on the top of real data
 print("...Phenotype simulation for sgVAMP\n", flush=True)
@@ -28,47 +29,9 @@ lam = float(args.lam) # Sparsity for simulations
 print("...Reading data from bed file %s\n" % bed_fpath, flush=True)
 
 # Load X matrix from bed file
-X = np.zeros((N,M))
-f = open(bed_fpath, "rb")
-raw_data = np.fromfile(f, dtype=np.uint8)
-
-#skip magic number
-raw_data = raw_data[3:]
-
-col_len_byte = N / 4 # One byte contatins genotype information of 4 individuals
-if N % 4:
-    col_len_byte = N / 4 + 1 
-
-# for computing marker means
-mrk_means = np.zeros(M)
-
-for j in range(M):
-    for i in range(N):
-        c = int(i / 4)
-        c = int((j * col_len_byte) + c); # Position of byte containing i-th individual's genotype
-        shift = (i % 4) * 2 # Bit shift within the byte
-        d = raw_data[c] >> shift
-        bit0 = bool(d & 0b00000001)
-        bit1 = bool(d & 0b00000010)
-
-        if bit0 and bit1: # 11 Homozygous for second allele
-            X[i,j] = 2
-        elif not bit0 and not bit1: # 00 Homozygous for first allele
-            X[i,j] = 0
-        elif not bit0 and bit1: # 10 Heterozygous
-            X[i,j] = 1
-        else: # 01 Missing genotype
-            X[i,j] = None # TODO aproximate missing values
-        if X[i,j] is not None:
-            mrk_means[j] += X[i,j]
-    mrk_means[j] /= N
-f.close()
-
-# repleace None values by marker mean
-for j in range(M):
-    for i in range(N):
-        if X[i,j] is None:
-            X[i,j] = mrk_means[j]
+# use bed_reader librabry
+bed = open_bed(bed_fpath)
+X = bed.read()
 
 # Standardization
 X = (X - np.mean(X,axis=0)) / np.std(X, axis=0) 
@@ -91,8 +54,6 @@ y = g + w
 print("Var(y) =", np.var(y))
 print("h2 =", np.var(g) / np.var(y))
 print("\n", flush=True)
-
-#y = (y - np.mean(y)) / np.std(y) # y standardization
 
 X /= np.sqrt(N) # normalization
 r = X.T @ y # marginal estimate vector
