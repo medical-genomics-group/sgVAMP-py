@@ -17,16 +17,16 @@ class VAMP:
     def denoiser(self, r, gam1):
         A = (1-self.lam) * norm.pdf(r, loc=0, scale=np.sqrt(1.0/gam1))
         B = self.lam * norm.pdf(r, loc=0, scale=np.sqrt(1.0 + 1.0/gam1))
-        ratio = gam1 * r / (gam1 + 1.0) * B / (A + B)
+        ratio = gam1 * r / (gam1 + 1.0) * B / (A + B + self.eps)
         return ratio
 
     def der_denoiser(self, r, gam1):
         A = (1-self.lam) * norm.pdf(r, loc=0, scale=np.sqrt(1.0/gam1))
         B = self.lam * norm.pdf(r, loc=0, scale=np.sqrt(1.0 + 1.0/gam1))
         Ader = A * (-r*gam1)
-        Bder = B * (-r) / (1.0 + 1.0/gam1)
-        BoverAplusBder = ( Bder * A - Ader * B ) / (A+B) / (A+B)
-        ratio = gam1 / (gam1 + 1.0) * B / (A + B) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
+        Bder = B * (-r) / (1.0 + 1.0/gam1 + self.eps)
+        BoverAplusBder = ( Bder * A - Ader * B ) / (A+B + self.eps) / (A+B + self.eps)
+        ratio = gam1 / (gam1 + 1.0) * B / (A + B + self.eps) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
         return ratio
     
     def infer(self,R,r,M,N,iterations,est=True,cg=True,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
@@ -72,7 +72,7 @@ class VAMP:
             if cg:
                 # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
                 xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit)
-                if ret > 0: print("WARNING: CG convergence after %d iterations not achieved!" % ret)
+                if ret > 0: print("WARNING: CG 1 convergence after %d iterations not achieved!" % ret)
                 xhat2.resize((M,1))
             else:
                 # True inverse
@@ -90,7 +90,7 @@ class VAMP:
                 if cg:
                     # Conjugate gradient for solving linear system (gamw * R + gam2 * I)^(-1) @ u
                     Sigma2_u, ret = con_grad(A,u, maxiter=cg_maxit)
-                    if ret > 0: print("WARNING: CG convergence after %d iterations not achieved!" % ret)
+                    if ret > 0: print("WARNING: CG 2 convergence after %d iterations not achieved!" % ret)
                 else:
                     # True inverse
                     Sigma2_u = Sigma2 @ u
