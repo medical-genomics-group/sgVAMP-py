@@ -23,7 +23,9 @@ parser.add_argument("-lam", "--lam", help = "Initial sparsity", default=0.5)
 parser.add_argument("-lmmse_damp", "--lmmse-damp", help = "Use LMMSE damping", default=True)
 parser.add_argument("-learn_gamw", "--learn-gamw", help = "Learn or fix gamw", default=True)
 parser.add_argument("-rho", "--rho", help = "Damping factor rho", default=0.5)
+parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", default=500)
 parser.add_argument("-ld_format", "--ld-format", help = "LD matrix format (npy or npz)", default='npz')
+parser.add_argument("-h_est", "--h-est", help = "Hutchinson trace estimator", default=True)
 args = parser.parse_args()
 
 # Input parameters
@@ -40,10 +42,14 @@ ld_format = args.ld_format # npy or npz
 rho = float(args.rho) # damping
 lmmse_damp = bool(int(args.lmmse_damp)) # damping
 learn_gamw = bool(int(args.learn_gamw)) # wheter to learn or not gamw
+cg_maxit = int(args.cg_maxit) # CG max iterations
+h_est = bool(int(args.h_est)) # Hutchinson trace estimator 
 
 print("--ld-file", ld_fpath)
 print("--lmmse-damp", lmmse_damp)
 print("--learn-gamw", learn_gamw)
+print("--cg-maxit", cg_maxit)
+print("--h-est", h_est)
 print("\n", flush=True)
 
 rho = float(args.rho) # damping
@@ -55,6 +61,7 @@ elif ld_format == 'npy':
     R = np.load(ld_fpath)["arr_0"]
 else:
     raise Exception("Unsupported LD format!")
+
 r = np.load(r_fpath)
 print("LD matrix and XTy loaded. Shapes: ", R.shape, r.shape, flush=True)
 
@@ -68,7 +75,7 @@ sgvamp = VAMP(lam=lam, rho=rho, gam1=gam1, gamw=gamw)
 # Inference
 print("...Running sgVAMP\n", flush=True)
 ts = time.time()
-xhat1, gamw = sgvamp.infer(R, r, M, N, iterations, est=True, cg=True, learn_gamw=learn_gamw, lmmse_damp=lmmse_damp)
+xhat1, gamw = sgvamp.infer(R, r, M, N, iterations, est=h_est, cg=True, cg_maxit=cg_maxit, learn_gamw=learn_gamw, lmmse_damp=lmmse_damp)
 print("\n")
 te = time.time()
 
