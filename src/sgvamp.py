@@ -5,6 +5,7 @@ import numpy as np
 from numpy.random import binomial
 from numpy.linalg import inv
 from scipy.sparse.linalg import cg as con_grad
+import scipy
 
 class VAMP:
     def __init__(self, rho, lam, gamw, gam1):
@@ -29,7 +30,7 @@ class VAMP:
         ratio = gam1 / (gam1 + 1.0) * B / (A + B + self.eps) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
         return ratio
     
-    def infer(self,R,r,M,N,iterations,est=True,cg=True,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
+    def infer(self,R,r,M,N,iterations,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
 
         # initialization
         r1 = np.zeros((M,1))
@@ -39,7 +40,7 @@ class VAMP:
         rho = self.rho # Damping factor
         gamw = self.gamw # Precision of noise
         xhat1s = []
-        I = np.identity(M) # Identity matrix
+        I = scipy.sparse.identity(M) # Identity matrix
         gamws = []
         alpha1 = 0
         alpha2 = 0
@@ -65,18 +66,11 @@ class VAMP:
             alpha2_prev = alpha2
             A = (gamw * R + gam2 * I) # Sigma2 = A^(-1)
             mu2 = (gamw * r + gam2 * r2)
-            
-            if not cg or not est: 
-                Sigma2 = inv(A) # Precompute A^(-1) if needed
 
-            if cg:
-                # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
-                xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit)
-                if ret > 0: print("WARNING: CG 1 convergence after %d iterations not achieved!" % ret)
-                xhat2.resize((M,1))
-            else:
-                # True inverse
-                xhat2 = Sigma2 @ mu2
+            # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
+            xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit)
+            if ret > 0: print("WARNING: CG 1 convergence after %d iterations not achieved!" % ret)
+            xhat2.resize((M,1))
 
             if lmmse_damp:
                 xhat2 = rho * xhat2 + (1 - rho) * xhat2_prev # damping on xhat2
@@ -84,20 +78,13 @@ class VAMP:
             # Generate iid random vector [-1,1] of size M
             u = binomial(p=1/2, n=1, size=M) * 2 - 1
 
-            if est:
-                # Hutchinson trace estimator
-                # Sigma2 = (gamw * R + gam2 * I)^(-1)
-                if cg:
-                    # Conjugate gradient for solving linear system (gamw * R + gam2 * I)^(-1) @ u
-                    Sigma2_u, ret = con_grad(A,u, maxiter=cg_maxit)
-                    if ret > 0: print("WARNING: CG 2 convergence after %d iterations not achieved!" % ret)
-                else:
-                    # True inverse
-                    Sigma2_u = Sigma2 @ u
-                TrSigma2 = u.T @ Sigma2_u # Tr[Sigma2] = u^T @ Sigma2 @ u 
-            else:
-                # True trace computation
-                TrSigma2 = np.trace(Sigma2)
+            # Hutchinson trace estimator
+            # Sigma2 = (gamw * R + gam2 * I)^(-1)
+            # Conjugate gradient for solving linear system (gamw * R + gam2 * I)^(-1) @ u
+            Sigma2_u, ret = con_grad(A,u, maxiter=cg_maxit)
+            if ret > 0: print("WARNING: CG 2 convergence after %d iterations not achieved!" % ret)
+
+            TrSigma2 = u.T @ Sigma2_u # Tr[Sigma2] = u^T @ Sigma2 @ u 
 
             alpha2 = gam2 * TrSigma2 / M
             if lmmse_damp:
@@ -107,12 +94,9 @@ class VAMP:
             z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
 
             if learn_gamw:
-                if est:
-                    # Hutchinson trace estimator
-                    TrRSigma2 = u.T @ R @ Sigma2_u # u^T @ R @ [(gamw * R + gam2 * I)^(-1) @ u]
-                else:
-                    # True trace computation
-                    TrRSigma2 = np.trace(R @ Sigma2) 
+
+                # Hutchinson trace estimator
+                TrRSigma2 = u.T @ R @ Sigma2_u # u^T @ R @ [(gamw * R + gam2 * I)^(-1) @ u]
 
                 # Update noise precison
                 gamw_prev = gamw
