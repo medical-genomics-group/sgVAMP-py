@@ -36,6 +36,7 @@ class VAMP:
         r1 = np.zeros((M,1))
         xhat1 = np.zeros((M,1)) # signal estimates in Denoising step
         xhat2 = np.zeros((M,1)) # signal estimates in LMMSE step
+        Sigma2_u = np.zeros((M,1))
         gam1 = self.gam1
         rho = self.rho # Damping factor
         gamw = self.gamw # Precision of noise
@@ -68,7 +69,7 @@ class VAMP:
             mu2 = (gamw * r + gam2 * r2)
 
             # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
-            xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit)
+            xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit, x0=xhat2_prev)
             if ret > 0: print("WARNING: CG 1 convergence after %d iterations not achieved!" % ret)
             xhat2.resize((M,1))
 
@@ -81,7 +82,8 @@ class VAMP:
             # Hutchinson trace estimator
             # Sigma2 = (gamw * R + gam2 * I)^(-1)
             # Conjugate gradient for solving linear system (gamw * R + gam2 * I)^(-1) @ u
-            Sigma2_u, ret = con_grad(A,u, maxiter=cg_maxit)
+            Sigma2_u_prev = Sigma2_u
+            Sigma2_u, ret = con_grad(A,u, maxiter=cg_maxit, x0=Sigma2_u_prev)
             if ret > 0: print("WARNING: CG 2 convergence after %d iterations not achieved!" % ret)
 
             TrSigma2 = u.T @ Sigma2_u # Tr[Sigma2] = u^T @ Sigma2 @ u 
@@ -91,9 +93,10 @@ class VAMP:
                 alpha2 = rho * alpha2 + (1 - rho) * alpha2_prev # damping on alpha2
             gam1 = gam2 * (1 - alpha2) / alpha2
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
-            z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
 
             if learn_gamw:
+
+                z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
 
                 # Hutchinson trace estimator
                 TrRSigma2 = u.T @ R @ Sigma2_u # u^T @ R @ [(gamw * R + gam2 * I)^(-1) @ u]
