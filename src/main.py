@@ -5,6 +5,7 @@ from sklearn.metrics import r2_score
 import time
 import argparse
 import scipy
+import struct
 
 # Test run for sgvamp
 print("...Test run of VAMP for summary statistics\n", flush=True)
@@ -51,11 +52,15 @@ print("\n", flush=True)
 # Loading LD matrix and XTy vector
 print("...loading LD matrix and XTy vector", flush=True)
 R = scipy.sparse.load_npz(ld_fpath)
-r = np.load(r_fpath)
+r = np.loadtxt(r_fpath).reshape((M,1))
 print("LD matrix and XTy loaded. Shapes: ", R.shape, r.shape, flush=True)
 
 # Loading true signals
-beta = np.load(true_signal_fpath)
+f = open(true_signal_fpath, "rb")
+buffer = f.read(M * 8)
+beta = struct.unpack(str(M)+'d', buffer)
+beta = np.array(beta).reshape((M,1))
+beta *= np.sqrt(N)
 print("True signals loaded. Shape: ", beta.shape, flush=True)
 
 # sgVAMP init
@@ -73,8 +78,14 @@ print("sgVAMP total running time: %0.4fs \n" % (te - ts), flush=True)
 
 # Print metrics
 corrs = []
+l2s = []
+
 for it in range(iterations):
     corr = np.corrcoef(xhat1[it].squeeze(), beta.squeeze()) # Pearson correlation coefficient of xhat1 and true signal beta
     corrs.append(corr[0,-1])
+    l2 = np.linalg.norm(xhat1[it].squeeze() - beta.squeeze()) / np.linalg.norm(beta.squeeze()) # L2 norm error
+    l2s.append(l2)
+
 print("Corr(x1hat,beta) over iterations: \n", corrs)
+print("L2 error (x1hat, beta) over iterations: \n", l2s)
 print("gamw over iterations: \n", gamw, flush=True)
