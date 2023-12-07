@@ -15,6 +15,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-ld_file", "--ld-file", help = "Path to LD matrix .npz file")
 parser.add_argument("-r_file", "--r-file", help = "Path to XTy .npy file")
 parser.add_argument("-true_signal_file", "--true-signal-file", help = "Path to true signal .npy file")
+parser.add_argument("-out_dir", "--out-dir", help = "Output directory")
+parser.add_argument("-out_name", "--out-name", help = "Output file name")
 parser.add_argument("-N", "--N", help = "Number of samples")
 parser.add_argument("-M", "--M", help = "Number of markers")
 parser.add_argument("-iterations", "--iterations", help = "Number of iterations", default=10)
@@ -31,6 +33,8 @@ args = parser.parse_args()
 ld_fpath = args.ld_file
 r_fpath = args.r_file
 true_signal_fpath = args.true_signal_file
+out_dir = args.out_dir
+out_name = args.out_name
 M = int(args.M) # Number of markers
 N = int(args.N) # Number of samples
 iterations = int(args.iterations)
@@ -53,6 +57,7 @@ print("\n", flush=True)
 print("...loading LD matrix and XTy vector", flush=True)
 R = scipy.sparse.load_npz(ld_fpath)
 r = np.loadtxt(r_fpath).reshape((M,1))
+
 print("LD matrix and XTy loaded. Shapes: ", R.shape, r.shape, flush=True)
 
 # Loading true signals
@@ -64,12 +69,12 @@ beta *= np.sqrt(N)
 print("True signals loaded. Shape: ", beta.shape, flush=True)
 
 # sgVAMP init
-sgvamp = VAMP(lam=lam, rho=rho, gam1=gam1, gamw=gamw)
+sgvamp = VAMP(lam=lam, rho=rho, gam1=gam1, gamw=gamw, out_dir=out_dir, out_name=out_name)
 
 # Inference
 print("...Running sgVAMP\n", flush=True)
 ts = time.time()
-xhat1, gamw = sgvamp.infer(R, r, M, N, iterations, cg_maxit=cg_maxit, learn_gamw=learn_gamw, lmmse_damp=lmmse_damp)
+xhat1 = sgvamp.infer(R, r, M, N, iterations, cg_maxit=cg_maxit, learn_gamw=learn_gamw, lmmse_damp=lmmse_damp)
 print("\n")
 te = time.time()
 
@@ -87,5 +92,4 @@ for it in range(iterations):
     l2s.append(l2)
 
 print("Corr(x1hat,beta) over iterations: \n", corrs)
-print("L2 error (x1hat, beta) over iterations: \n", l2s)
-print("gamw over iterations: \n", gamw, flush=True)
+print("L2 error (x1hat, beta) over iterations: \n", l2s, flush=True)
