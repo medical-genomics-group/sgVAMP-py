@@ -24,6 +24,7 @@ parser.add_argument("-lmmse_damp", "--lmmse-damp", help = "Use LMMSE damping", d
 parser.add_argument("-learn_gamw", "--learn-gamw", help = "Learn or fix gamw", default=True)
 parser.add_argument("-rho", "--rho", help = "Damping factor rho", default=0.5)
 parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", default=500)
+parser.add_argument("-s", "--s",  help = "Rused = (1-s) * R + s * Id", default=0.1)
 args = parser.parse_args()
 
 # Input parameters
@@ -41,6 +42,7 @@ lmmse_damp = bool(int(args.lmmse_damp)) # damping
 learn_gamw = bool(int(args.learn_gamw)) # wheter to learn or not gamw
 cg_maxit = int(args.cg_maxit) # CG max iterations
 rho = float(args.rho) # damping
+s = float(args.s) # regularization parameter for the correlation matrix
 
 print("--ld-file", ld_fpath)
 print("--lmmse-damp", lmmse_damp)
@@ -51,6 +53,7 @@ print("\n", flush=True)
 # Loading LD matrix and XTy vector
 print("...loading LD matrix and XTy vector", flush=True)
 R = scipy.sparse.load_npz(ld_fpath)
+R = (1-s) * R + s * scipy.sparse.identity(M)
 r = np.load(r_fpath)
 print("LD matrix and XTy loaded. Shapes: ", R.shape, r.shape, flush=True)
 
