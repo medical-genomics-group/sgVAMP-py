@@ -60,7 +60,6 @@ print("...loading LD matrix and XTy vector", flush=True)
 R = scipy.sparse.load_npz(ld_fpath)
 R = (1-s) * R + s * scipy.sparse.identity(M)
 r = np.loadtxt(r_fpath).reshape((M,1))
-
 print("LD matrix and XTy loaded. Shapes: ", R.shape, r.shape, flush=True)
 
 # Loading true signals
@@ -77,7 +76,9 @@ sgvamp = VAMP(lam=lam, rho=rho, gam1=gam1, gamw=gamw, out_dir=out_dir, out_name=
 # Inference
 print("...Running sgVAMP\n", flush=True)
 ts = time.time()
+
 xhat1 = sgvamp.infer(R, r, M, N, iterations, cg_maxit=cg_maxit, learn_gamw=learn_gamw, lmmse_damp=lmmse_damp)
+
 print("\n")
 te = time.time()
 
