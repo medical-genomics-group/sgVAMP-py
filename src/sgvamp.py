@@ -9,11 +9,14 @@ import scipy
 import os
 import csv
 import struct
+from mpi4py import MPI
 
 class VAMP:
-    def __init__(self, rho, lam, gamw, gam1, out_dir, out_name):
+    def __init__(self, rho, lam, sigmas, p_weights, gamw, gam1, out_dir, out_name):
         self.eps = 1e-32
         self.lam = lam
+        self.sigmas = sigmas # a vector containing variances of different groups
+        self.p_weights = p_weights # vector containing probability weights for the slab component 
         self.rho = rho
         self.gamw = gamw
         self.gam1 = gam1
@@ -44,24 +47,48 @@ class VAMP:
         f.write(struct.pack(str(len(xhat))+'d', *xhat.squeeze()))
         f.close()
 
-    def denoiser(self, r, gam1):
+    # gam1s = a vector of gam1 values over different GWAS studies
+    def denoiser_meta(self, rs, gam1s):
+        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
+        mu_meta = np.inner(rs, gam1s) * sigma2_meta
+        max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
+        EXP = 0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind] )
+        Num = self.lam * sum(self.p_weights * EXP * mu_meta)
+        Den = (1-self.lam) + self.lam * sum(self.p_weights * EXP)
+        return Num/Den
+
+    def denoiser(self, r, gam1): # not numerically stable! AD
         A = (1-self.lam) * norm.pdf(r, loc=0, scale=np.sqrt(1.0/gam1))
-        B = self.lam * norm.pdf(r, loc=0, scale=np.sqrt(1.0 + 1.0/gam1))
+        B = self.lam * norm.pdf(r, loc=0, scale=np.sqrt(self.sigmas + 1.0/gam1))
         ratio = gam1 * r / (gam1 + 1.0) * B / (A + B + self.eps)
         return ratio
 
-    def der_denoiser(self, r, gam1):
+    def der_denoiser_meta(self, rs, gam1s):
+        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
+        mu_meta = np.inner(rs, gam1s) * sigma2_meta
+        max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
+        EXP = 0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / (sigma2_meta * sigma2_meta[max_ind])
+        Num = self.lam * sum(self.p_weights * EXP * mu_meta)
+        Den = (1-self.lam) + self.lam * sum(self.p_weights * EXP)
+        DerNum = self.lam * sum(self.p_weights * mu_meta * EXP * (sigma2_meta * mu_meta * mu_meta + 1) * sigma2_meta * gam1s)
+        DerDen = self.lam * sum(self.p_weights * mu_meta * mu_meta * EXP * gam1s * sigma2_meta * sigma2_meta)
+        return (DerNum * Den - DerDen * Num) / (Den * Den)
+    
+    def der_denoiser(self, r, gam1): # not numerically stable! AD
         A = (1-self.lam) * norm.pdf(r, loc=0, scale=np.sqrt(1.0/gam1))
-        B = self.lam * norm.pdf(r, loc=0, scale=np.sqrt(1.0 + 1.0/gam1))
+        B = self.lam * norm.pdf(r, loc=0, scale=np.sqrt(self.sigmas + 1.0/gam1))
         Ader = A * (-r*gam1)
         Bder = B * (-r) / (1.0 + 1.0/gam1 + self.eps)
         BoverAplusBder = ( Bder * A - Ader * B ) / (A+B + self.eps) / (A+B + self.eps)
         ratio = gam1 / (gam1 + 1.0) * B / (A + B + self.eps) + BoverAplusBder * r * gam1 / (gam1 + 1.0)
         return ratio
     
-    def infer(self,R,r,M,N,iterations,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
+    def infer(self,R,r,M,N,K,iterations,cg_maxit=500,learn_gamw=True, lmmse_damp=True, Comm=MPI.COMM_WORLD):
 
         # initialization
+        rank = Comm.Get_rank()
+        size_MPI = Comm.Get_size()
+
         r1 = r #np.zeros((M,1))
         xhat1 = np.zeros((M,1)) # signal estimates in Denoising step
         xhat2 = np.zeros((M,1)) # signal estimates in LMMSE step
@@ -78,14 +105,37 @@ class VAMP:
         for it in range(iterations):
             print("-----ITERATION %d -----"%(it), flush=True)
             # Denoising
+            # collecting r1s from all the processes
+            r1s = np.zeros((K, M)) # every column represents one marker
+            r1s[rank,:] = r1.flatten()
+            gam1s =np.zeros((K,1))
+            gam1s[rank] = gam1
+
+            if (size_MPI > 1):
+                for dest in range(K):
+                    if dest!=rank:
+                        reqr1S = Comm.Isend(r1s[rank], tag=0, dest=dest)
+                        reqgam1S = Comm.Isend(gam1s[rank], tag=1, dest=dest)
+
+                for source in range(K):
+                    if source!=rank:
+                        reqr1R = Comm.Irecv(r1s[source], tag=0, source=source)
+                        reqgam1R = Comm.Irecv(gam1s[source], tag=1, source=source)
+
+            Comm.Barrier()
+
             print("...Denoising", flush=True)
             xhat1_prev = xhat1
             alpha1_prev = alpha1
             vect_den_beta = lambda x: self.denoiser(x, gam1)
+            # vect_den_beta_meta = lambda x: self.denoiser_meta(x, gam1s)
             xhat1 = vect_den_beta(r1)
+            # xhat1 = np.apply_along_axis(vect_den_beta, axis=1, arr=r1s)
             xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
             xhat1s.append(xhat1)
             alpha1 = np.mean( self.der_denoiser(r1, gam1) )
+            # vect_der_den_beta_meta = lambda x: self.der_denoiser_meta(x, gam1s)
+            # xhat1 = np.mean( np.apply_along_axis(vect_der_den_beta, axis=1, arr=r1s) )
             alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
             gam2 = gam1 * (1 - alpha1) / alpha1
             r2 = (xhat1 - alpha1 * r1) / (1 - alpha1)
