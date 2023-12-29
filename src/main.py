@@ -1,4 +1,5 @@
 from sgvamp import VAMP
+from sim_phen_from_R import sim_linear,sim_r
 import numpy as np
 from numpy.linalg import norm
 from sklearn.metrics import r2_score
@@ -34,8 +35,9 @@ parser.add_argument("-learn_gamw", "--learn-gamw", help = "Learn or fix gamw", d
 parser.add_argument("-rho", "--rho", help = "Damping factor rho", default=0.5)
 parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", default=500)
 parser.add_argument("-s", "--s",  help = "Rused = (1-s) * R + s * Id", default=0.1)
-parser.add_argument("-sigmas", "--sigmas",  help = "variance groups for the slab mixtures, separated by commas", default="1")
-parser.add_argument("-p_weights", "--p_weights",  help = "probability weights for the slab mixtures, separated by commas", default="1")
+parser.add_argument("-sigmas", "--sigmas",  help = "Variance groups for the slab mixtures, separated by commas", default="1")
+parser.add_argument("-p_weights", "--p_weights",  help = "Probability weights for the slab mixtures, separated by commas", default="1")
+parser.add_argument("-sim_mode", "--sim-mode", help = "Indicates whether or not to simulate the marginal effects within the run", default=0)
 args = parser.parse_args()
 
 # Input parameters
@@ -60,10 +62,12 @@ sigmas = np.array([float(x) for x in args.sigmas.split(",")]) # variance groups 
 p_weights = np.array([float(x) for x in args.p_weights.split(",")]) # variance groups for the prior distribution
 L = len(sigmas) # number of mixture components 
 K = len(ld_fpaths) # numer of GWAS studies
+sim_mode = int(args.sim_mode) # indicator whether or not to simulate marginal effects within a run
 
 # initializing MPI processes
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
+size_MPI = comm.Get_size()
 
 logging.info(f"--ld-file {ld_fpaths[rank]}")
 logging.info(f"--lmmse-damp {lmmse_damp}")
@@ -75,16 +79,30 @@ logging.info("...loading LD matrix and XTy vector")
 # print("...loading LD matrix and XTy vector", flush=True)
 R = scipy.sparse.load_npz(ld_fpaths[rank])
 R = (1-s) * R + s * scipy.sparse.identity(M)
-r = np.loadtxt(r_fpaths[rank]).reshape((M,1))
-logging.info(f"LD matrix and XTy loaded. Shapes: {R.shape} {r.shape}")
 
-# Loading true signals
-f = open(true_signal_fpath, "rb")
-buffer = f.read(M * 8)
-beta = struct.unpack(str(M)+'d', buffer)
-beta = np.array(beta).reshape((M,1))
-beta *= np.sqrt(N)
-logging.info(f"True signals loaded. Shape: {beta.shape}")
+if sim_mode==0:
+    r = np.loadtxt(r_fpaths[rank]).reshape((M,1))
+    # Loading true signals
+    f = open(true_signal_fpath, "rb")
+    buffer = f.read(M * 8)
+    beta = struct.unpack(str(M)+'d', buffer)
+    beta = np.array(beta).reshape((M,1))
+    beta *= np.sqrt(N)
+    logging.info(f"True signals loaded. Shape: {beta.shape}")
+else:
+    if rank==0:
+        r,beta=sim_linear(M, R, h2=0.5, CV=2000)
+        if (size_MPI > 1):
+            for dest in range(1,K):
+                reqbetaS = comm.Isend(beta, tag=1, dest=dest)
+    else:
+        r=np.zeros(M)
+        beta=np.zeros(M)
+        for rank_id in range(1,K):
+            reqbetaR = comm.Irecv(beta, tag=1, source=0)
+            r = sim_r(R, beta)
+
+logging.info(f"LD matrix and XTy loaded. Shapes: {R.shape} {r.shape}")
 
 comm.Barrier()
 
