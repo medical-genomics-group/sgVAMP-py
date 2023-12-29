@@ -7,9 +7,14 @@ import argparse
 import scipy
 import struct
 from mpi4py import MPI
+import logging
+
+# Configuring logging options
+logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
 
 # Test run for sgvamp
-print("### VAMP for summary statistics ###\n", flush=True)
+logging.info("### VAMP for summary statistics ###\n")
+# print("### VAMP for summary statistics ###\n", flush=True)
 
 # Initialize parser
 parser = argparse.ArgumentParser()
@@ -60,18 +65,18 @@ K = len(ld_fpaths) # numer of GWAS studies
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 
-print("--ld-file", ld_fpaths[rank])
-print("--lmmse-damp", lmmse_damp)
-print("--learn-gamw", learn_gamw)
-print("--cg-maxit", cg_maxit)
-print("\n", flush=True)
+logging.info(f"--ld-file {ld_fpaths[rank]}")
+logging.info(f"--lmmse-damp {lmmse_damp}")
+logging.info(f"--learn-gamw {learn_gamw}")
+logging.info(f"--cg-maxit {cg_maxit}\n")
 
 # Loading LD matrix and XTy vector
-print("...loading LD matrix and XTy vector", flush=True)
+logging.info("...loading LD matrix and XTy vector")
+# print("...loading LD matrix and XTy vector", flush=True)
 R = scipy.sparse.load_npz(ld_fpaths[rank])
 R = (1-s) * R + s * scipy.sparse.identity(M)
 r = np.loadtxt(r_fpaths[rank]).reshape((M,1))
-print("LD matrix and XTy loaded. Shapes: ", R.shape, r.shape, flush=True)
+logging.info(f"LD matrix and XTy loaded. Shapes: {R.shape} {r.shape}")
 
 # Loading true signals
 f = open(true_signal_fpath, "rb")
@@ -79,7 +84,7 @@ buffer = f.read(M * 8)
 beta = struct.unpack(str(M)+'d', buffer)
 beta = np.array(beta).reshape((M,1))
 beta *= np.sqrt(N)
-print("True signals loaded. Shape: ", beta.shape, flush=True)
+logging.info(f"True signals loaded. Shape: {beta.shape}")
 
 comm.Barrier()
 
@@ -87,29 +92,28 @@ comm.Barrier()
 sgvamp = VAMP(lam=lam, rho=rho, gam1=gam1, sigmas=sigmas, p_weights=p_weights, gamw=gamw, out_dir=out_dir, out_name=out_name)
 
 # Inference
-print("...Running sgVAMP\n", flush=True)
+logging.info("...Running sgVAMP\n")
 ts = time.time()
 
 xhat1 = sgvamp.infer(R, r, M, N, K, iterations, cg_maxit=cg_maxit, learn_gamw=learn_gamw, lmmse_damp=lmmse_damp, Comm=comm)
 
-print("\n")
 te = time.time()
 
 comm.Barrier()
 
 # Print running time and metrics
 if rank==0:
-    print("sgVAMP total running time: %0.4fs \n" % (te - ts), flush=True)
+    logging.info(f"sgVAMP total running time: {(te - ts):0.4f} \n")
 
     # Print metrics
     corrs = []
     l2s = []
 
     for it in range(iterations):
-        corr = np.corrcoef(xhat1[it].squeeze(), beta.squeeze()) # Pearson correlation coefficient of xhat1 and true signal beta
-        corrs.append(corr[0,-1])
+        corr = np.inner(xhat1[it].squeeze(), beta.squeeze()) / np.linalg.norm(xhat1[it].squeeze()) / np.linalg.norm(beta.squeeze())
+        corrs.append(corr)
         l2 = np.linalg.norm(xhat1[it].squeeze() - beta.squeeze()) / np.linalg.norm(beta.squeeze()) # L2 norm error
         l2s.append(l2)
 
-    print("Corr(x1hat,beta) over iterations: \n", corrs)
-    print("L2 error (x1hat, beta) over iterations: \n", l2s, flush=True)
+    logging.info(f"Alignment(x1hat,beta) over iterations: {corrs} \n")
+    logging.info(f"L2 error(x1hat, beta) over iterations: {l2s} \n")
