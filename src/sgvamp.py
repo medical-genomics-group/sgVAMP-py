@@ -145,3 +145,95 @@ class VAMP:
             self.write_xhat_to_file(it, xhat1)
 
         return xhat1s
+
+class multiVAMP(VAMP):
+
+    def denoiser(self, r, gam1):
+        # TODO
+        print("DENOISER not implemented!",flush=True)
+        return r[0]
+
+    def der_denoiser(self, r, gam1):
+        # TODO
+        print("DENOISER derivative not implemented!",flush=True)
+        return 0
+    
+    def infer(self,R_list,r_list,M,N,iterations,K,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
+        
+        print("multi-cohort sgVAMP inference", flush=True)
+        
+        # initialization
+        r1 = r_list #np.zeros((M,1))
+        xhat1 = np.zeros((M,1)) # signal estimates in Denoising step
+        xhat2 = np.zeros((M,1)) # signal estimates in LMMSE step
+        Sigma2_u_prev = [] 
+        gam1 = []
+
+        for i in range(K):
+            gam1.append(self.gam1)
+            Sigma2_u_prev.append(np.zeros((M,1)))
+        rho = self.rho # Damping factor
+        gamw = self.gamw # Precision of noise
+        xhat1s = []
+        I = scipy.sparse.identity(M) # Identity matrix
+        gamws = []
+        alpha1 = 0
+        alpha2 = 0
+
+        for it in range(iterations):
+            print("-----ITERATION %d -----"%(it), flush=True)
+            # Denoising
+            print("...Denoising", flush=True)
+            xhat1_prev = xhat1
+            alpha1_prev = alpha1
+            vect_den_beta = lambda x: self.denoiser(x, gam1)
+            xhat1 = vect_den_beta(r1)
+            xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
+            xhat1s.append(xhat1)
+            alpha1 = np.mean( self.der_denoiser(r1, gam1) )
+            alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
+
+            # LMMSE for multiple cohorts
+            print("...LMMSE", flush=True)
+            xhat2_prev = xhat2
+            alpha2_prev = alpha2
+            for i in range(K):
+
+                print("...processing cohort %d" % (i), flush=True)
+
+                gam2 = gam1[i] * (1 - alpha1) / alpha1
+                r2 = (xhat1 - alpha1 * r1[i]) / (1 - alpha1)
+
+                A = (gamw * R_list[i] + gam2 * I) # Sigma2 = A^(-1)
+                mu2 = (gamw * r_list[i] + gam2 * r2)
+
+                # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
+                xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit, x0=xhat2_prev)
+            
+                if ret > 0: print("WARNING: CG 1 convergence after %d iterations not achieved!" % ret)
+                xhat2.resize((M,1))
+
+                if lmmse_damp:
+                    xhat2 = rho * xhat2 + (1 - rho) * xhat2_prev # damping on xhat2
+
+                # Generate iid random vector [-1,1] of size M
+                u = binomial(p=1/2, n=1, size=M) * 2 - 1
+
+                # Hutchinson trace estimator
+                # Sigma2 = (gamw * R + gam2 * I)^(-1)
+                # Conjugate gradient for solving linear system (gamw * R + gam2 * I)^(-1) @ u
+
+                Sigma2_u, ret = con_grad(A,u, maxiter=cg_maxit, x0=Sigma2_u_prev[i])
+                Sigma2_u_prev[i] = Sigma2_u
+
+                if ret > 0: print("WARNING: CG 2 convergence after %d iterations not achieved!" % ret)
+
+                TrSigma2 = u.T @ Sigma2_u # Tr[Sigma2] = u^T @ Sigma2 @ u 
+
+                alpha2 = gam2 * TrSigma2 / M
+                if lmmse_damp:
+                    alpha2 = rho * alpha2 + (1 - rho) * alpha2_prev # damping on alpha2
+                gam1[i] = gam2 * (1 - alpha2) / alpha2
+                r1[i] = (xhat2 - alpha2 * r2) / (1-alpha2)
+
+        return xhat1s
