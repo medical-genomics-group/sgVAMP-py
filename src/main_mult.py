@@ -21,6 +21,8 @@ parser.add_argument("-N", "--N", help = "Number of samples")
 parser.add_argument("-M", "--M", help = "Number of markers")
 parser.add_argument("-iterations", "--iterations", help = "Number of iterations", default=10)
 parser.add_argument("-K", "--K", help = "Number of cohorts", default=1)
+parser.add_argument("-sigmas", "--sigmas", help = "Variances of different cohorts", default="")
+parser.add_argument("-p_weights", "--p-weights", help = "Prior weights of different cohorts", default="")
 parser.add_argument("-gamw", "--gamw", help = "Initial noise precision", default=5)
 parser.add_argument("-gam1", "--gam1", help = "Initial signal precision", default=100)
 parser.add_argument("-lam", "--lam", help = "Initial sparsity", default=0.5)
@@ -41,6 +43,8 @@ M = int(args.M) # Number of markers
 N = int(args.N) # Number of samples
 iterations = int(args.iterations)
 K = int(args.K)
+sigmas = args.sigmas
+p_weights = args.p_weights
 gamw = float(args.gamw) # Initial noise precision
 gam1 = float(args.gam1) # initial signal precision
 lam = float(args.lam) # Sparsity for simulations
@@ -61,8 +65,14 @@ print("\n", flush=True)
 print("...loading LD matrix and XTy vector", flush=True)
 R_list = []
 r_list = []
+sigma_list = []
+p_weight_list = []
+
 ld_fpath_list = ld_fpaths.split(",")
 r_fpath_list = r_fpaths.split(",")
+sigma_list = [float(x) for x in sigmas.split(",")] # variance groups for the prior distribution
+p_weight_list = [float(x) for x in p_weights.split(",")] # variance groups for the prior distribution
+
 if len(ld_fpath_list) != K:
     raise Exception("Specified number of cohorts is not equal to number of LD matrices provided!")
 if len(r_fpath_list) != K:
@@ -83,7 +93,7 @@ for i in range(K):
 print("LD matrix and XTy loaded. Shapes: ", R.shape, r.shape, flush=True)
 
 # multi-cohort sgVAMP init
-sgvamp = multiVAMP(lam=lam, rho=rho, gam1=gam1, gamw=gamw, out_dir=out_dir, out_name=out_name)
+sgvamp = multiVAMP(lam=lam, rho=rho, gam1=gam1, gamw=gamw, sigmas=sigma_list, p_weights=p_weight_list, out_dir=out_dir, out_name=out_name)
 
 # Inference
 print("...Running multi-cohort sgVAMP\n", flush=True)

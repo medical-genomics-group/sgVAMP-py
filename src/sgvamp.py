@@ -148,30 +148,49 @@ class VAMP:
 
 class multiVAMP(VAMP):
 
-    def denoiser(self, r, gam1):
-        # TODO
-        print("DENOISER not implemented!",flush=True)
-        return r[0]
+    def __init__(self, rho, lam, gamw, gam1, sigmas, p_weights, out_dir, out_name):
 
-    def der_denoiser(self, r, gam1):
-        # TODO
-        print("DENOISER derivative not implemented!",flush=True)
-        return 0
+        super(multiVAMP, self).__init__(rho, lam, gamw, gam1, out_dir, out_name)
+        self.sigmas = np.array(sigmas) # a vector containing variances of different groups
+        self.p_weights = np.array(p_weights)
+
+    def denoiser(self, rs, gam1s):
+        # gam1s = a vector of gam1 values over different GWAS studies
+        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
+        mu_meta = np.inner(rs, gam1s) * sigma2_meta
+        max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
+        EXP = 0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind] )
+        Num = self.lam * sum(self.p_weights * EXP * mu_meta)
+        Den = (1-self.lam) + self.lam * sum(self.p_weights * EXP)
+        return Num/Den
+
+    def der_denoiser(self, rs, gam1s):
+
+        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
+        mu_meta = np.inner(rs, gam1s) * sigma2_meta
+        max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
+        EXP = 0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / (sigma2_meta * sigma2_meta[max_ind])
+        Num = self.lam * sum(self.p_weights * EXP * mu_meta)
+        Den = (1-self.lam) + self.lam * sum(self.p_weights * EXP)
+        DerNum = self.lam * sum(self.p_weights * mu_meta * EXP * (sigma2_meta * mu_meta * mu_meta + 1) * sigma2_meta * gam1s)
+        DerDen = self.lam * sum(self.p_weights * mu_meta * mu_meta * EXP * gam1s * sigma2_meta * sigma2_meta)
+        return (DerNum * Den - DerDen * Num) / (Den * Den)
     
     def infer(self,R_list,r_list,M,N,iterations,K,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
         
         print("multi-cohort sgVAMP inference", flush=True)
         
         # initialization
-        r1 = r_list #np.zeros((M,1))
+        r1 = np.array(r_list).reshape((K,M))
         xhat1 = np.zeros((M,1)) # signal estimates in Denoising step
         xhat2 = np.zeros((M,1)) # signal estimates in LMMSE step
         Sigma2_u_prev = [] 
         gam1 = []
-
         for i in range(K):
             gam1.append(self.gam1)
             Sigma2_u_prev.append(np.zeros((M,1)))
+        gam1 = np.array(gam1)#.reshape((K,1))
+
         rho = self.rho # Damping factor
         gamw = self.gamw # Precision of noise
         xhat1s = []
@@ -186,11 +205,12 @@ class multiVAMP(VAMP):
             print("...Denoising", flush=True)
             xhat1_prev = xhat1
             alpha1_prev = alpha1
-            vect_den_beta = lambda x: self.denoiser(x, gam1)
-            xhat1 = vect_den_beta(r1)
+
+            xhat1 = np.array([self.denoiser(r1[:,i], gam1) for i in range(M)]).reshape((M,1))
             xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
             xhat1s.append(xhat1)
-            alpha1 = np.mean( self.der_denoiser(r1, gam1) )
+            
+            alpha1 = np.mean(np.array([self.der_denoiser(r1[:,i], gam1) for i in range(M)]))
             alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
 
             # LMMSE for multiple cohorts
@@ -201,11 +221,15 @@ class multiVAMP(VAMP):
 
                 print("...processing cohort %d" % (i), flush=True)
 
+                r1i = r1[i,:].reshape((M,1))
+
                 gam2 = gam1[i] * (1 - alpha1) / alpha1
-                r2 = (xhat1 - alpha1 * r1[i]) / (1 - alpha1)
+                r2 = (xhat1 - alpha1 * r1i) / (1 - alpha1)
 
                 A = (gamw * R_list[i] + gam2 * I) # Sigma2 = A^(-1)
                 mu2 = (gamw * r_list[i] + gam2 * r2)
+                #print(np.shape(r_list[i]))
+                
 
                 # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
                 xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit, x0=xhat2_prev)
@@ -234,6 +258,10 @@ class multiVAMP(VAMP):
                 if lmmse_damp:
                     alpha2 = rho * alpha2 + (1 - rho) * alpha2_prev # damping on alpha2
                 gam1[i] = gam2 * (1 - alpha2) / alpha2
-                r1[i] = (xhat2 - alpha2 * r2) / (1-alpha2)
+                r1[i,:] = np.squeeze((xhat2 - alpha2 * r2) / (1-alpha2))
+
+            # Write parameters from current iteration to output file
+            self.write_params_to_file([it, gamw, gam1[-1], gam2, alpha1, alpha2])
+            self.write_xhat_to_file(it, xhat1)
 
         return xhat1s
