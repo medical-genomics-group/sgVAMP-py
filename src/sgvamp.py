@@ -53,9 +53,10 @@ class VAMP:
         sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
         mu_meta = np.inner(rs, gam1s) * sigma2_meta
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
-        EXP = 0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind] )
-        Num = self.lam * sum(self.p_weights * EXP * mu_meta)
-        Den = (1-self.lam) + self.lam * sum(self.p_weights * EXP)
+        EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind] ) )
+        Num = self.lam * sum(self.p_weights * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
+        EXP2 = np.exp(- 0.5 * ((mu_meta[max_ind])**2 / sigma2_meta[max_ind]))
+        Den = (1-self.lam) + self.lam * sum(self.p_weights * EXP * np.sqrt(sigma2_meta / self.sigmas))
         return Num/Den
 
     def denoiser(self, r, gam1): # not numerically stable! AD
@@ -68,11 +69,14 @@ class VAMP:
         sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
         mu_meta = np.inner(rs, gam1s) * sigma2_meta
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
-        EXP = 0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / (sigma2_meta * sigma2_meta[max_ind])
-        Num = self.lam * sum(self.p_weights * EXP * mu_meta)
-        Den = (1-self.lam) + self.lam * sum(self.p_weights * EXP)
-        DerNum = self.lam * sum(self.p_weights * mu_meta * EXP * (sigma2_meta * mu_meta * mu_meta + 1) * sigma2_meta * gam1s)
-        DerDen = self.lam * sum(self.p_weights * mu_meta * mu_meta * EXP * gam1s * sigma2_meta * sigma2_meta)
+        EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * mu_meta[max_ind] * sigma2_meta) / (sigma2_meta * sigma2_meta[max_ind]))
+        Num = self.lam * sum(self.p_weights * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
+        
+        EXP2 = np.exp(- 0.5 * ((mu_meta[max_ind])**2 / sigma2_meta[max_ind]))
+        Den = (1-self.lam) * EXP2 + self.lam * sum(self.p_weights * EXP * np.sqrt(sigma2_meta / self.sigmas))
+        
+        DerNum = self.lam * sum(self.p_weights * EXP * (sigma2_meta * mu_meta * mu_meta + 1) * sigma2_meta * gam1s * np.sqrt(sigma2_meta / self.sigmas))
+        DerDen = self.lam * sum(self.p_weights * mu_meta * mu_meta * EXP * gam1s * sigma2_meta * sigma2_meta * np.sqrt(sigma2_meta / self.sigmas))
         return (DerNum * Den - DerDen * Num) / (Den * Den)
     
     def der_denoiser(self, r, gam1): # not numerically stable! AD
@@ -104,13 +108,16 @@ class VAMP:
         alpha2 = 0
 
         for it in range(iterations):
-            logging.info(f"-----ITERATION {it} -----")
+            if rank==0:
+                logging.info(f"-----ITERATION {it} -----")
             # Denoising
             # collecting r1s from all the processes
             r1s = np.zeros((K, M)) # every column represents one marker
-            r1s[rank,:] = r1.flatten()
+            r1s[rank,:] = np.reshape(r1, (1, -1))
             gam1s =np.zeros((K,1))
             gam1s[rank] = gam1
+
+            Comm.Barrier()
 
             if (size_MPI > 1):
                 for dest in range(K):
@@ -125,8 +132,9 @@ class VAMP:
 
             Comm.Barrier()
 
-            logging.info("...Denoising")
-            logging.debug(f"gam1 = {gam1:0.9f}")
+            if rank==0:
+                logging.info("...Denoising")
+                logging.debug(f"gam1 = {gam1:0.9f}")
             xhat1_prev = xhat1
             alpha1_prev = alpha1
             vect_den_beta = lambda x: self.denoiser(x, gam1)
@@ -139,13 +147,16 @@ class VAMP:
             # vect_der_den_beta_meta = lambda x: self.der_denoiser_meta(x, gam1s)
             # xhat1 = np.mean( np.apply_along_axis(vect_der_den_beta, axis=1, arr=r1s) )
             alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
-            logging.debug(f"alpha1 = {alpha1:0.9f}")
+            if rank==0:
+                logging.debug(f"alpha1 = {alpha1:0.9f}")
             gam2 = gam1 * (1 - alpha1) / alpha1
-            logging.debug(f"gam2 = {gam2:0.9f}")
+            if rank==0:
+                logging.debug(f"gam2 = {gam2:0.9f}")
             r2 = (xhat1 - alpha1 * r1) / (1 - alpha1)
 
             # LMMSE
-            logging.info("...LMMSE")
+            if rank==0: 
+                logging.info("...LMMSE")
             xhat2_prev = xhat2
             alpha2_prev = alpha2
             A = (gamw * R + gam2 * I) # Sigma2 = A^(-1)
@@ -154,7 +165,7 @@ class VAMP:
             # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
             xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit, x0=xhat2_prev)
             
-            if ret > 0: 
+            if ret > 0 and rank==0: 
                 logging.info(f"WARNING: CG 1 convergence after {ret} iterations not achieved!")
             xhat2.resize((M,1))
 
@@ -171,7 +182,7 @@ class VAMP:
             Sigma2_u_prev = Sigma2_u
             Sigma2_u, ret = con_grad(A,u, maxiter=cg_maxit, x0=Sigma2_u_prev)
 
-            if ret > 0: 
+            if ret > 0 and rank==0: 
                 logging.info(f"WARNING: CG 2 convergence after {ret} iterations not achieved!")
 
             TrSigma2 = u.T @ Sigma2_u # Tr[Sigma2] = u^T @ Sigma2 @ u 
@@ -179,7 +190,8 @@ class VAMP:
             alpha2 = gam2 * TrSigma2 / M
             if lmmse_damp:
                 alpha2 = rho * alpha2 + (1 - rho) * alpha2_prev # damping on alpha2
-            logging.debug(f"alpha2 = {alpha2:0.9f}")
+            if rank==0:
+                logging.debug(f"alpha2 = {alpha2:0.9f}")
             gam1 = gam2 * (1 - alpha2) / alpha2
             r1 = (xhat2 - alpha2 * r2) / (1-alpha2)
 
@@ -196,7 +208,8 @@ class VAMP:
                 gamw = float(gamw.squeeze())
                 gamw = rho * gamw + (1 - rho) * gamw_prev # damping on gamw
             gamws.append(gamw)
-            logging.debug(f"gamw = {gamw:0.9f} \n")
+            if rank==0:
+                logging.debug(f"gamw = {gamw:0.9f} \n")
 
             # Write parameters from current iteration to output file
             self.write_params_to_file([it, gamw, gam1, gam2, alpha1, alpha2])
