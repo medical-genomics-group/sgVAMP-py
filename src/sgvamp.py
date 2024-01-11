@@ -81,11 +81,11 @@ class VAMP:
             print("...Denoising", flush=True)
             xhat1_prev = xhat1
             alpha1_prev = alpha1
-            vect_den_beta = lambda x: self.denoiser(x, gam1)
+            #vect_den_beta = lambda x: self.denoiser(x, gam1)
             xhat1 = vect_den_beta(r1)
             xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
             xhat1s.append(xhat1)
-            alpha1 = np.mean( self.der_denoiser(r1, gam1) )
+            #alpha1 = np.mean( self.der_denoiser(r1, gam1) )
             alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
             gam2 = gam1 * (1 - alpha1) / alpha1
             r2 = (xhat1 - alpha1 * r1) / (1 - alpha1)
@@ -151,29 +151,33 @@ class multiVAMP(VAMP):
     def __init__(self, rho, lam, gamw, gam1, sigmas, p_weights, out_dir, out_name):
 
         super(multiVAMP, self).__init__(rho, lam, gamw, gam1, out_dir, out_name)
-        self.sigmas = np.array(sigmas) # a vector containing variances of different groups
-        self.p_weights = np.array(p_weights)
+        self.sigmas = np.array([1]) # a vector containing variances of different groups
+        self.p_weights = np.array([1])
 
-    def denoiser(self, rs, gam1s):
+    def denoiser_meta(self, rs, gam1s):
         # gam1s = a vector of gam1 values over different GWAS studies
         sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
         mu_meta = np.inner(rs, gam1s) * sigma2_meta
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
-        EXP = 0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind] )
-        Num = self.lam * sum(self.p_weights * EXP * mu_meta)
-        Den = (1-self.lam) + self.lam * sum(self.p_weights * EXP)
+        EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind]))
+        Num = self.lam * sum(self.p_weights * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
+        EXP2 = np.exp(- 0.5 * ((mu_meta[max_ind])**2 / sigma2_meta[max_ind]))
+        Den = (1-self.lam) * EXP2 + self.lam * sum(self.p_weights * EXP * np.sqrt(sigma2_meta / self.sigmas))
         return Num/Den
 
-    def der_denoiser(self, rs, gam1s):
+    def der_denoiser_meta(self, rs, gam1s):
 
         sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
         mu_meta = np.inner(rs, gam1s) * sigma2_meta
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
-        EXP = 0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / (sigma2_meta * sigma2_meta[max_ind])
-        Num = self.lam * sum(self.p_weights * EXP * mu_meta)
-        Den = (1-self.lam) + self.lam * sum(self.p_weights * EXP)
-        DerNum = self.lam * sum(self.p_weights * mu_meta * EXP * (sigma2_meta * mu_meta * mu_meta + 1) * sigma2_meta * gam1s)
-        DerDen = self.lam * sum(self.p_weights * mu_meta * mu_meta * EXP * gam1s * sigma2_meta * sigma2_meta)
+        EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * sigma2_meta) / (sigma2_meta * sigma2_meta[max_ind]))
+        Num = self.lam * sum(self.p_weights * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
+        
+        EXP2 = np.exp(- 0.5 * ((mu_meta[max_ind])**2 / sigma2_meta[max_ind]))
+        Den = (1-self.lam) * EXP2 + self.lam * sum(self.p_weights * EXP * np.sqrt(sigma2_meta / self.sigmas))
+        
+        DerNum = self.lam * sum(self.p_weights * EXP * (sigma2_meta * mu_meta * mu_meta + 1) * sigma2_meta * gam1s * np.sqrt(sigma2_meta / self.sigmas))
+        DerDen = self.lam * sum(self.p_weights * mu_meta * mu_meta * EXP * gam1s * sigma2_meta * sigma2_meta * np.sqrt(sigma2_meta / self.sigmas))
         return (DerNum * Den - DerDen * Num) / (Den * Den)
     
     def infer(self,R_list,r_list,M,N,iterations,K,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
@@ -206,11 +210,12 @@ class multiVAMP(VAMP):
             xhat1_prev = xhat1
             alpha1_prev = alpha1
 
-            xhat1 = np.array([self.denoiser(r1[:,i], gam1) for i in range(M)]).reshape((M,1))
+            xhat1 = np.array([self.denoiser_meta(r1[:,i], gam1) for i in range(M)]).reshape((M,1))
+
             xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
             xhat1s.append(xhat1)
             
-            alpha1 = np.mean(np.array([self.der_denoiser(r1[:,i], gam1) for i in range(M)]))
+            alpha1 = np.mean(np.array([self.der_denoiser_meta(r1[:,i], gam1) for i in range(M)]))
             alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
 
             # LMMSE for multiple cohorts
@@ -228,9 +233,7 @@ class multiVAMP(VAMP):
 
                 A = (gamw * R_list[i] + gam2 * I) # Sigma2 = A^(-1)
                 mu2 = (gamw * r_list[i] + gam2 * r2)
-                #print(np.shape(r_list[i]))
                 
-
                 # Conjugate gradient for solving linear system A^(-1) @ mu2 = Sigma2 @ mu2
                 xhat2, ret = con_grad(A, mu2, maxiter=cg_maxit, x0=xhat2_prev)
             
