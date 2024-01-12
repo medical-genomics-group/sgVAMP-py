@@ -66,7 +66,7 @@ class VAMP:
 
     def denoiser_meta(self, rs, gam1s):
         # gam1s = a vector of gam1 values over different GWAS studies
-        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
+        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L - 1
         mu_meta = np.inner(rs, gam1s) * sigma2_meta
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
         EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind]) )
@@ -76,7 +76,7 @@ class VAMP:
         return Num/Den
 
     def der_denoiser_meta(self, rs, gam1s):
-        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L
+        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L - 1
         mu_meta = np.inner(rs, gam1s) * sigma2_meta
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
         EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind]) )
@@ -108,10 +108,14 @@ class VAMP:
             
             # Denoising
             logging.info("...Denoising")
+            
             xhat1_prev = xhat1
             alpha1_prev = alpha1
+            
             xhat1 = np.array([self.denoiser_meta(r1[:,i], gam1) for i in range(M)]).reshape((M,1))
+
             xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
+
             xhat1s.append(xhat1)
             self.write_xhat_to_file(it, xhat1)
 
