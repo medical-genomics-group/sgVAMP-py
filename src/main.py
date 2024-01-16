@@ -7,11 +7,18 @@ import argparse
 import scipy
 import struct
 import logging
+from mpi4py import MPI
+
+# Initializing MPI processes
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size_MPI = comm.Get_size()
 
 # Configuring logging options
-logging.basicConfig(format='%(message)s', level=logging.DEBUG)
+logging.basicConfig(format='%(message)s', level=logging.INFO)
 
-logging.info(" ### VAMP for summary statistics ###\n")
+if rank == 0:
+    logging.info(" ### VAMP for summary statistics ###\n")
 
 # Initialize parser
 parser = argparse.ArgumentParser()
@@ -58,39 +65,10 @@ cg_maxit = int(args.cg_maxit) # CG max iterations
 rho = float(args.rho) # damping
 s = float(args.s) # regularization parameter for the correlation matrix
 
-logging.info("Input arguments:")
-logging.info(f"--ld-files {ld_fpaths}")
-logging.info(f"--r-files {r_fpaths}")
-logging.info(f"--out-name {out_name}")
-logging.info(f"--out-dir {out_dir}")
-logging.info(f"--true-signal-file {true_signal_fpath}")
-logging.info(f"--N {N}")
-logging.info(f"--M {M}")
-logging.info(f"--K {K}")
-logging.info(f"--L {L}")
-logging.info(f"--iterations {iterations}")
-logging.info(f"--prior-vars {prior_vars}")
-logging.info(f"--prior-probs {prior_probs}")
-logging.info(f"--gam1 {gam1}")
-logging.info(f"--gamw {gamw}")
-logging.info(f"--lmmse-damp {lmmse_damp}")
-logging.info(f"--learn-gamw {learn_gamw}")
-logging.info(f"--rho {rho}")
-logging.info(f"--cg-maxit {cg_maxit}")
-logging.info(f"--s {s}\n")
-
-# Loading LD matrix and XTy vector
-logging.info(f"...loading LD matrix and XTy vector\n")
-
-R_list = []
-r_list = []
-sigma_list = []
-p_weight_list = []
-
 ld_fpaths_list = ld_fpaths.split(",")
 r_fpaths_list = r_fpaths.split(",")
 prior_vars_list = [float(x) for x in prior_vars.split(",")] # variance groups for the prior distribution
-prior_probs_list = [float(x) for x in prior_probs.split(",")] # variance groups for the prior distribution
+prior_probs_list = [float(x) for x in prior_probs.split(",")] # probability groups for the prior distribution
 
 if len(ld_fpaths_list) != K:
     raise Exception("Specified number of cohorts is not equal to number of LD matrices provided!")
@@ -101,26 +79,54 @@ if len(prior_vars_list) != L:
 if len(prior_probs_list) != L:
     raise Exception("Number of prior mixture probabilites must be L!")
 
-for i in range(K):
-    ld_fpath = ld_fpaths_list[i]
-    r_fpath = r_fpaths_list[i]
+if rank == 0:
+    logging.info("Input arguments:")
+    logging.info(f"--ld-files {ld_fpaths}")
+    logging.info(f"--r-files {r_fpaths}")
+    logging.info(f"--out-name {out_name}")
+    logging.info(f"--out-dir {out_dir}")
+    logging.info(f"--true-signal-file {true_signal_fpath}")
+    logging.info(f"--N {N}")
+    logging.info(f"--M {M}")
+    logging.info(f"--K {K}")
+    logging.info(f"--L {L}")
+    logging.info(f"--iterations {iterations}")
+    logging.info(f"--prior-vars {prior_vars}")
+    logging.info(f"--prior-probs {prior_probs}")
+    logging.info(f"--gam1 {gam1}")
+    logging.info(f"--gamw {gamw}")
+    logging.info(f"--lmmse-damp {lmmse_damp}")
+    logging.info(f"--learn-gamw {learn_gamw}")
+    logging.info(f"--rho {rho}")
+    logging.info(f"--cg-maxit {cg_maxit}")
+    logging.info(f"--s {s}\n")
 
-    if ld_fpath.endswith('.npz'):
-        R = scipy.sparse.load_npz(ld_fpath)
-    elif ld_fpath.endswith('.npy'):
-        R = np.load(ld_fpath)
-    else: 
-        raise Exception("Unsupported LD matrix format!")
-    R = (1-s) * R + s * scipy.sparse.identity(M)
-    R_list.append(R)
+# Loading LD matrix and XTy vector
+if rank == 0:
+    logging.info(f"...loading LD matrix and XTy vector\n")
 
-    if r_fpath.endswith('.txt'):
-        r = np.loadtxt(r_fpath).reshape((M,1))
-    elif ld_fpath.endswith('.npy'):
-        r = np.load(r_fpath)
-    else:
-        raise Exception("Unsupported XTy vector format!")
-    r_list.append(r)
+ld_fpath = ld_fpaths_list[rank]
+r_fpath = r_fpaths_list[rank]
+
+if ld_fpath.endswith('.npz'):
+    R = scipy.sparse.load_npz(ld_fpath)
+elif ld_fpath.endswith('.npy'):
+    R = np.load(ld_fpath)
+else: 
+    raise Exception("Unsupported LD matrix format!")
+
+logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
+
+R = (1-s) * R + s * scipy.sparse.identity(M)
+
+if r_fpath.endswith('.txt'):
+    r = np.loadtxt(r_fpath).reshape((M,1))
+elif ld_fpath.endswith('.npy'):
+    r = np.load(r_fpath)
+else:
+    raise Exception("Unsupported XTy vector format!")
+
+logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 
 # Loading true signals
 if true_signal_fpath.endswith(".bin"):
@@ -135,7 +141,8 @@ elif true_signal_fpath.endswith(".npy"):
 else:
     raise Exception("Unsupported true signal format!")
 
-logging.info(f"True signals loaded. Shape: {beta.shape}\n")
+if rank == 0:
+    logging.info(f"True signals loaded. Shape: {beta.shape}\n")
 
 # multi-cohort sgVAMP init
 sgvamp = VAMP(  K=K,
@@ -145,25 +152,28 @@ sgvamp = VAMP(  K=K,
                 prior_vars=prior_vars_list, 
                 prior_probs=prior_probs_list, 
                 out_dir=out_dir, 
-                out_name=out_name)
+                out_name=out_name,
+                comm=comm)
 
 # Inference
-logging.info("...Running sgVAMP\n")
+if rank == 0:
+    logging.info("...Running sgVAMP\n")
+
 ts = time.time()
 
-xhat1 = sgvamp.infer(   R_list, 
-                        r_list, 
+xhat1 = sgvamp.infer(   R, 
+                        r, 
                         M, 
                         N, 
                         iterations, 
                         cg_maxit=cg_maxit, 
                         learn_gamw=learn_gamw, 
                         lmmse_damp=lmmse_damp)
-
 te = time.time()
 
 # Print running time
-logging.info(f"sgVAMP total running time: {(te - ts):0.4f}s\n")
+if rank == 0:
+    logging.info(f"sgVAMP total running time: {(te - ts):0.4f}s\n")
 
 # Print metrics
 corrs = []
@@ -174,6 +184,6 @@ for it in range(iterations):
     corrs.append(corr)
     l2 = np.linalg.norm(xhat1[it].squeeze() - beta.squeeze()) / np.linalg.norm(beta.squeeze()) # L2 norm error
     l2s.append(l2)
-
-logging.info(f"Alignment(x1hat, beta) over iterations: \n {corrs}\n")
-logging.info(f"L2 error(x1hat, beta) over iterations: \n {l2s}\n")
+if rank == 0:
+    logging.info(f"Alignment(x1hat, beta) over iterations: \n {corrs}\n")
+    logging.info(f"L2 error(x1hat, beta) over iterations: \n {l2s}\n")
