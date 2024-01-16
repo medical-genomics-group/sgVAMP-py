@@ -15,7 +15,7 @@ rank = comm.Get_rank()
 size_MPI = comm.Get_size()
 
 # Configuring logging options
-logging.basicConfig(format='%(message)s', level=logging.DEBUG)
+logging.basicConfig(format='%(message)s', level=logging.INFO)
 
 if rank == 0:
     logging.info(" ### VAMP for summary statistics ###\n")
@@ -68,7 +68,7 @@ s = float(args.s) # regularization parameter for the correlation matrix
 ld_fpaths_list = ld_fpaths.split(",")
 r_fpaths_list = r_fpaths.split(",")
 prior_vars_list = [float(x) for x in prior_vars.split(",")] # variance groups for the prior distribution
-prior_probs_list = [float(x) for x in prior_probs.split(",")] # variance groups for the prior distribution
+prior_probs_list = [float(x) for x in prior_probs.split(",")] # probability groups for the prior distribution
 
 if len(ld_fpaths_list) != K:
     raise Exception("Specified number of cohorts is not equal to number of LD matrices provided!")
