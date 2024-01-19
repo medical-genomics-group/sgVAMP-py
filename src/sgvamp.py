@@ -84,9 +84,9 @@ class VAMP:
         Num = self.lam * sum( self.omegas * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
         EXP2 = np.exp(- 0.5 * ((mu_meta[max_ind])**2 / sigma2_meta[max_ind]))
         Den = (1- self.lam) * EXP2 + self.lam * sum( self.omegas * EXP * np.sqrt(sigma2_meta / self.sigmas))
-        DerNum = self.lam * sum( self.omegas * EXP * (mu_meta * mu_meta + sigma2_meta) * gam1s * np.sqrt(sigma2_meta / self.sigmas) )
-        DerDen = self.lam * sum( self.omegas * mu_meta * EXP * gam1s * np.sqrt(sigma2_meta / self.sigmas) )
-        return (DerNum * Den - DerDen * Num) / (Den * Den)
+        DerNum = self.lam * sum( self.omegas * EXP * (mu_meta * mu_meta + sigma2_meta) * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
+        DerDen = self.lam * sum( self.omegas * mu_meta * EXP * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
+        return (DerNum * Den - DerDen * Num) / (Den * Den) * self.K
 
     def infer(self,R,r,M,N,iterations,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
 
