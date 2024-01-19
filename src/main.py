@@ -15,7 +15,7 @@ rank = comm.Get_rank()
 size_MPI = comm.Get_size()
 
 # Configuring logging options
-logging.basicConfig(format='%(message)s', level=logging.INFO)
+logging.basicConfig(format='%(message)s', level=logging.DEBUG)
 
 if rank == 0:
     logging.info(" ### VAMP for summary statistics ###\n")
