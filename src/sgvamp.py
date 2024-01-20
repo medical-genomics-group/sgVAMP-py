@@ -31,7 +31,7 @@ class VAMP:
         # Setup output CSV file for hyperparameters
         for i in range(self.K):
             csv_file = open(os.path.join(self.out_dir, "%s_cohort_%d.csv" % (self.out_name, i+1)), 'w', newline="")
-            csv_writer = csv.writer(csv_file)
+            csv_writer = csv.writer(csv_file, delimiter='\t')
             header = ["it", "gamw", "gam1", "gam2", "alpha1", "alpha2"]
             csv_writer.writerow(header)
             csv_file.close()
@@ -39,7 +39,7 @@ class VAMP:
     def write_params_to_file(self, params, cohort_idx):
         # Setup output CSV file for hyperparameters
         csv_file = open(os.path.join(self.out_dir, "%s_cohort_%d.csv" % (self.out_name, cohort_idx+1)), 'a', newline="")
-        csv_writer = csv.writer(csv_file)
+        csv_writer = csv.writer(csv_file, delimiter='\t')
         csv_writer.writerow(params)
         csv_file.close()
     
@@ -77,16 +77,16 @@ class VAMP:
         return Num/Den
 
     def der_denoiser_meta(self, rs, gam1s):
-        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a numpy vector of dimension L - 1
+        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/ self.sigmas) # a numpy vector of dimension L - 1
         mu_meta = np.inner(rs, gam1s) * sigma2_meta # a numpy vector of dimension L - 1
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
         EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind]) )
-        Num = self.lam * sum(self.omegas * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
+        Num = self.lam * sum( self.omegas * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
         EXP2 = np.exp(- 0.5 * ((mu_meta[max_ind])**2 / sigma2_meta[max_ind]))
-        Den = (1-self.lam) * EXP2 + self.lam * sum(self.omegas * EXP * np.sqrt(sigma2_meta / self.sigmas))
-        DerNum = self.lam * sum( self.omegas * EXP * (sigma2_meta * mu_meta * mu_meta + 1) * sigma2_meta * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
-        DerDen = self.lam * sum( self.omegas * mu_meta * mu_meta * EXP * gam1s[self.comm.Get_rank()] * sigma2_meta * sigma2_meta * np.sqrt(sigma2_meta / self.sigmas) )
-        return (DerNum * Den - DerDen * Num) / (Den * Den)
+        Den = (1- self.lam) * EXP2 + self.lam * sum( self.omegas * EXP * np.sqrt(sigma2_meta / self.sigmas))
+        DerNum = self.lam * sum( self.omegas * EXP * (mu_meta * mu_meta + sigma2_meta) * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
+        DerDen = self.lam * sum( self.omegas * mu_meta * EXP * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
+        return (DerNum * Den - DerDen * Num) / (Den * Den) * self.K
 
     def infer(self,R,r,M,N,iterations,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
 
@@ -136,7 +136,8 @@ class VAMP:
 
             xhat1 = np.array([self.denoiser_meta(r1s[:,j], gam1s) for j in range(M)]).reshape((M,1))
 
-            xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
+            if it > 0:
+                xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
 
             xhat1s.append(xhat1)
             
@@ -144,7 +145,11 @@ class VAMP:
                 self.write_xhat_to_file(it, xhat1)
 
             alpha1 = np.mean(np.array([self.der_denoiser_meta(r1s[:,j], gam1s) for j in range(M)]))
-            alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
+
+            if it > 0:
+                alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
+            
+            np.clip(alpha1, 1e-5, (1 - 1e-5))
 
             if rank==0:
                 logging.debug(f"[rank = {rank}] alpha1 = {alpha1}")

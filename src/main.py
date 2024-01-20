@@ -15,7 +15,7 @@ rank = comm.Get_rank()
 size_MPI = comm.Get_size()
 
 # Configuring logging options
-logging.basicConfig(format='%(message)s', level=logging.INFO)
+logging.basicConfig(format='%(message)s', level=logging.DEBUG)
 
 if rank == 0:
     logging.info(" ### VAMP for summary statistics ###\n")
@@ -27,7 +27,7 @@ parser.add_argument("-r_files", "--r-files", help = "Path to XTy .npy files sepa
 parser.add_argument("-true_signal_file", "--true-signal-file", help = "Path to true signal .npy file")
 parser.add_argument("-out_dir", "--out-dir", help = "Output directory")
 parser.add_argument("-out_name", "--out-name", help = "Output file name")
-parser.add_argument("-N", "--N", help = "Number of samples")
+parser.add_argument("-N", "--N", help = "Number of samples in each cohort, saparated by comma")
 parser.add_argument("-M", "--M", help = "Number of markers")
 parser.add_argument("-K", "--K", help = "Number of cohorts", default=1)
 parser.add_argument("-L", "--L", help = "Number of prior mixture components", default=2)
@@ -50,7 +50,7 @@ true_signal_fpath = args.true_signal_file
 out_dir = args.out_dir
 out_name = args.out_name
 M = int(args.M) # Number of markers
-N = int(args.N) # Number of samples
+Ns = args.N # Number of samples
 iterations = int(args.iterations)
 K = int(args.K)
 L = int(args.L)
@@ -67,8 +67,11 @@ s = float(args.s) # regularization parameter for the correlation matrix
 
 ld_fpaths_list = ld_fpaths.split(",")
 r_fpaths_list = r_fpaths.split(",")
+N_list = [int(n) for n in Ns.split(",")]
+N = N_list[rank]
 prior_vars_list = [float(x) for x in prior_vars.split(",")] # variance groups for the prior distribution
 prior_probs_list = [float(x) for x in prior_probs.split(",")] # probability groups for the prior distribution
+
 
 if len(ld_fpaths_list) != K:
     raise Exception("Specified number of cohorts is not equal to number of LD matrices provided!")
@@ -86,7 +89,7 @@ if rank == 0:
     logging.info(f"--out-name {out_name}")
     logging.info(f"--out-dir {out_dir}")
     logging.info(f"--true-signal-file {true_signal_fpath}")
-    logging.info(f"--N {N}")
+    logging.info(f"--N {Ns}")
     logging.info(f"--M {M}")
     logging.info(f"--K {K}")
     logging.info(f"--L {L}")
@@ -121,7 +124,7 @@ R = (1-s) * R + s * scipy.sparse.identity(M)
 
 if r_fpath.endswith('.txt'):
     r = np.loadtxt(r_fpath).reshape((M,1))
-elif ld_fpath.endswith('.npy'):
+elif r_fpath.endswith('.npy'):
     r = np.load(r_fpath)
 else:
     raise Exception("Unsupported XTy vector format!")
@@ -187,3 +190,5 @@ for it in range(iterations):
 if rank == 0:
     logging.info(f"Alignment(x1hat, beta) over iterations: \n {corrs}\n")
     logging.info(f"L2 error(x1hat, beta) over iterations: \n {l2s}\n")
+
+MPI.Finalize()
