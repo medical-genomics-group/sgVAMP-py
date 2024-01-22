@@ -135,23 +135,26 @@ logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 if true_signal_fpath.endswith(".bin"):
     f = open(true_signal_fpath, "rb")
     buffer = f.read(M * 8)
-    beta = struct.unpack(str(M)+'d', buffer)
-    beta = np.array(beta).reshape((M,1))
-    beta *= np.sqrt(N)
+    x0 = struct.unpack(str(M)+'d', buffer)
+    x0 = np.array(x0).reshape((M,1))
+    x0 *= np.sqrt(N)
 elif true_signal_fpath.endswith(".npy"):
-    beta = np.load(true_signal_fpath)
-    beta *= np.sqrt(N)
+    x0 = np.load(true_signal_fpath)
+    x0 *= np.sqrt(N)
 else:
     raise Exception("Unsupported true signal format!")
 
 if rank == 0:
-    logging.info(f"True signals loaded. Shape: {beta.shape}\n")
+    logging.info(f"True signals loaded. Shape: {x0.shape}\n")
+
+a = np.array(N_list) / sum(N_list) # scaling factor for group
 
 # multi-cohort sgVAMP init
 sgvamp = VAMP(  K=K,
                 rho=rho, 
                 gam1=gam1, 
-                gamw=gamw, 
+                gamw=gamw,
+                a=a, 
                 prior_vars=prior_vars_list, 
                 prior_probs=prior_probs_list, 
                 out_dir=out_dir, 
@@ -168,7 +171,8 @@ xhat1 = sgvamp.infer(   R,
                         r, 
                         M, 
                         N, 
-                        iterations, 
+                        iterations,
+                        x0=x0,
                         cg_maxit=cg_maxit, 
                         learn_gamw=learn_gamw, 
                         lmmse_damp=lmmse_damp)
@@ -179,16 +183,16 @@ if rank == 0:
     logging.info(f"sgVAMP total running time: {(te - ts):0.4f}s\n")
 
 # Print metrics
-corrs = []
+alignments = []
 l2s = []
 
 for it in range(iterations):
-    corr = np.inner(xhat1[it].squeeze(), beta.squeeze()) / np.linalg.norm(xhat1[it].squeeze()) / np.linalg.norm(beta.squeeze())
-    corrs.append(corr)
-    l2 = np.linalg.norm(xhat1[it].squeeze() - beta.squeeze()) / np.linalg.norm(beta.squeeze()) # L2 norm error
+    alignment = np.inner(xhat1[it].squeeze(), x0.squeeze()) / np.linalg.norm(xhat1[it].squeeze()) / np.linalg.norm(x0.squeeze())
+    alignments.append(alignment)
+    l2 = np.linalg.norm(xhat1[it].squeeze() - x0.squeeze()) / np.linalg.norm(x0.squeeze()) # L2 norm error
     l2s.append(l2)
 if rank == 0:
-    logging.info(f"Alignment(x1hat, beta) over iterations: \n {corrs}\n")
-    logging.info(f"L2 error(x1hat, beta) over iterations: \n {l2s}\n")
+    logging.info(f"Alignment(x1hat, x0) over iterations: \n {alignments}\n")
+    logging.info(f"L2 error(x1hat, x0) over iterations: \n {l2s}\n")
 
 MPI.Finalize()
