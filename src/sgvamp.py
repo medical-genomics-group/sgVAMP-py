@@ -12,12 +12,13 @@ import struct
 import logging
 
 class VAMP:
-    def __init__(self, K, rho, gamw, gam1, prior_vars, prior_probs, out_dir, out_name, comm):
+    def __init__(self, K, rho, gamw, gam1, a, prior_vars, prior_probs, out_dir, out_name, comm):
         self.eps = 1e-32
         self.K = K
         self.rho = rho
         self.gamw = gamw
         self.gam1 = gam1 #np.full(K, gam1)
+        self.a = a
         self.lam = 1 - prior_probs[0]
         self.sigmas = np.array(prior_vars[1:]) # a vector containing variances of different groups except the first one, length = L-1
         self.omegas = np.array([ p / sum(prior_probs[1:]) for p in prior_probs[1:]])
@@ -36,11 +37,23 @@ class VAMP:
             csv_writer.writerow(header)
             csv_file.close()
 
+        # Setup file for metrics output
+        csv_file_metrics = open(os.path.join(self.out_dir, "%s_metrics.csv" % (self.out_name)), 'w', newline="")
+        csv_metrics_writer = csv.writer(csv_file_metrics, delimiter='\t')
+        header = ["it", "alignment", "l2"]
+        csv_metrics_writer.writerow(header)
+        csv_file_metrics.close()
+
     def write_params_to_file(self, params, cohort_idx):
-        # Setup output CSV file for hyperparameters
         csv_file = open(os.path.join(self.out_dir, "%s_cohort_%d.csv" % (self.out_name, cohort_idx+1)), 'a', newline="")
         csv_writer = csv.writer(csv_file, delimiter='\t')
         csv_writer.writerow(params)
+        csv_file.close()
+
+    def write_metrics_to_file(self, metrics):
+        csv_file = open(os.path.join(self.out_dir, "%s_metrics.csv" % (self.out_name)), 'a', newline="")
+        csv_writer = csv.writer(csv_file, delimiter='\t')
+        csv_writer.writerow(metrics)
         csv_file.close()
     
     def write_xhat_to_file(self, it, xhat):
@@ -67,8 +80,8 @@ class VAMP:
 
     def denoiser_meta(self, rs, gam1s):
         # gam1s = a vector of gam1 values over different GWAS studies
-        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/self.sigmas)  # a vector of dimension L - 1
-        mu_meta = np.inner(rs, gam1s) * sigma2_meta
+        sigma2_meta = 1.0 / (sum(self.a * gam1s) + 1.0/self.sigmas)  # a vector of dimension L - 1
+        mu_meta = np.inner(rs, self.a * gam1s) * sigma2_meta
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
         EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind]) )
         Num = self.lam * sum(self.omegas * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
@@ -77,18 +90,18 @@ class VAMP:
         return Num/Den
 
     def der_denoiser_meta(self, rs, gam1s):
-        sigma2_meta = 1.0 / (sum(gam1s) + 1.0/ self.sigmas) # a numpy vector of dimension L - 1
-        mu_meta = np.inner(rs, gam1s) * sigma2_meta # a numpy vector of dimension L - 1
+        sigma2_meta = 1.0 / (sum(self.a * gam1s) + 1.0/ self.sigmas) # a numpy vector of dimension L - 1
+        mu_meta = np.inner(rs, self.a * gam1s) * sigma2_meta # a numpy vector of dimension L - 1
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
         EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind]) )
         Num = self.lam * sum( self.omegas * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
         EXP2 = np.exp(- 0.5 * ((mu_meta[max_ind])**2 / sigma2_meta[max_ind]))
         Den = (1- self.lam) * EXP2 + self.lam * sum( self.omegas * EXP * np.sqrt(sigma2_meta / self.sigmas))
-        DerNum = self.lam * sum( self.omegas * EXP * (mu_meta * mu_meta + sigma2_meta) * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
-        DerDen = self.lam * sum( self.omegas * mu_meta * EXP * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
-        return (DerNum * Den - DerDen * Num) / (Den * Den) * self.K
+        DerNum = self.lam * sum( self.omegas * EXP * (mu_meta * mu_meta + sigma2_meta) * self.a[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
+        DerDen = self.lam * sum( self.omegas * mu_meta * EXP * self.a[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
+        return (DerNum * Den - DerDen * Num) / (Den * Den)
 
-    def infer(self,R,r,M,N,iterations,cg_maxit=500,learn_gamw=True, lmmse_damp=True):
+    def infer(self,R,r,M,N,iterations, x0, cg_maxit=500,learn_gamw=True, lmmse_damp=True):
 
         # Initialization
         rank = self.comm.Get_rank()
@@ -107,6 +120,9 @@ class VAMP:
         gamws = []
         alpha1 = 0
         alpha2 = 0
+
+        if rank == 0:
+            logging.debug(f"a = {self.a}")
 
         for it in range(iterations):
             if rank == 0:
@@ -225,5 +241,14 @@ class VAMP:
 
             # Write parameters for current cohort to csv file
             self.write_params_to_file([it, gamw, gam1, gam2, alpha1, alpha2], rank)
+
+            # Calculate error metrics
+            alignment = np.inner(xhat1.squeeze(), x0.squeeze()) / np.linalg.norm(xhat1.squeeze()) / np.linalg.norm(x0.squeeze()) # Alignment
+            l2 = np.linalg.norm(xhat1.squeeze() - x0.squeeze()) / np.linalg.norm(x0.squeeze()) # L2 norm error
+        
+            if rank==0:
+                logging.debug(f"Alignment(xhat1, x0) = {alignment:0.9f} \n")
+                logging.debug(f"L2_error(xhat1, x0) = {l2:0.9f} \n")
+                self.write_metrics_to_file([it, alignment, l2])
 
         return xhat1s
