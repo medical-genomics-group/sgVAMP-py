@@ -161,6 +161,9 @@ class VAMP:
                 self.write_xhat_to_file(it, xhat1)
 
             alpha1 = np.mean(np.array([self.der_denoiser_meta(r1s[:,j], gam1s) for j in range(M)]))
+            delta = 1 - np.log(2*alpha1)
+            if alpha1<0.5:
+                alpha1 *= delta
 
             if it > 0:
                 alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
