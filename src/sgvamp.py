@@ -121,7 +121,7 @@ class VAMP:
 
         for i in range(self.L):
             y[i] = self.log_likelihood_der(i,omega0,omega,r1,sigma2,gam,gam1)
-            
+
         y[self.L] = sum(omega) - 1.0 
         return y
 
@@ -142,7 +142,7 @@ class VAMP:
 
         x, _, ier, _ = scipy.optimize.fsolve(func=self.func, x0=x0, args=(omega0,r1s,sigma2,gam1s), full_output=True)
        
-       if ier != 1:
+        if ier != 1:
             if rank == 0:
                 logging.info(f"WARNING: fsolve not converged. No prior update!")
             return
@@ -151,7 +151,7 @@ class VAMP:
             self.lam = 1 - x[0]
             self.omegas = np.array([ w / sum(x[1:-1]) for w in x[1:-1]])
 
-    def infer(self,R,r,iterations, x0, cg_maxit=500,learn_gamw=True, lmmse_damp=True):
+    def infer(self,R,r,iterations, x0, cg_maxit=500,learn_gamw=True, lmmse_damp=True, mle_prior_update=True):
 
         # Initialization
         M = self.M
@@ -196,9 +196,9 @@ class VAMP:
                 logging.info(f"...Data from all ranks collected")
 
             # Update prior
-            if it > 0:
+            if it > 0 and mle_prior_update:
                 if rank == 0:
-                    logging.info("...Updating prior parameters")
+                    logging.info("...Updating prior parameters using MLE")
                 self.prior_update_mle(r1s, gam1s)
             
             if rank == 0:
