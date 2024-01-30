@@ -150,7 +150,9 @@ if rank == 0:
 a = np.array(N_list) / sum(N_list) # scaling factor for group
 
 # multi-cohort sgVAMP init
-sgvamp = VAMP(  K=K,
+sgvamp = VAMP(  N=N,
+                M=M,
+                K=K,
                 rho=rho, 
                 gam1=gam1, 
                 gamw=gamw,
@@ -168,9 +170,7 @@ if rank == 0:
 ts = time.time()
 
 xhat1 = sgvamp.infer(   R, 
-                        r, 
-                        M, 
-                        N, 
+                        r,
                         iterations,
                         x0=x0,
                         cg_maxit=cg_maxit, 

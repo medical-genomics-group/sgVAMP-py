@@ -12,9 +12,12 @@ import struct
 import logging
 
 class VAMP:
-    def __init__(self, K, rho, gamw, gam1, a, prior_vars, prior_probs, out_dir, out_name, comm):
+    def __init__(self, N, M, K, rho, gamw, gam1, a, prior_vars, prior_probs, out_dir, out_name, comm):
         self.eps = 1e-32
+        self.N = N
+        self.M = M
         self.K = K
+        self.L = len(prior_probs)
         self.rho = rho
         self.gamw = gamw
         self.gam1 = gam1 #np.full(K, gam1)
@@ -33,7 +36,7 @@ class VAMP:
         for i in range(self.K):
             csv_file = open(os.path.join(self.out_dir, "%s_cohort_%d.csv" % (self.out_name, i+1)), 'w', newline="")
             csv_writer = csv.writer(csv_file, delimiter='\t')
-            header = ["it", "gamw", "gam1", "gam2", "alpha1", "alpha2"]
+            header = ["it", "gamw", "gam1", "gam2", "alpha1", "alpha2", "lam"]
             csv_writer.writerow(header)
             csv_file.close()
 
@@ -101,9 +104,58 @@ class VAMP:
         DerDen = self.lam * sum( self.omegas * mu_meta * EXP * self.a[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
         return (DerNum * Den - DerDen * Num) / (Den * Den)
 
-    def infer(self,R,r,M,N,iterations, x0, cg_maxit=500,learn_gamw=True, lmmse_damp=True):
+    def log_likelihood_der(self, i, omega0, omega, r1, sigma2, gam, gam1):
+        SUM_K = 0
+        for k in range(self.K):
+            NUM = self.a[self.comm.Get_rank()] * scipy.stats.norm.pdf(r1[k,:], 0.0, scale=np.sqrt(sigma2[i] + 1 / gam1[k]))
+            DEN = np.zeros(self.M)
+            for l in range(self.L):
+                DEN += omega[l] * scipy.stats.norm.pdf(r1[k,:], 0.0, scale=np.sqrt(sigma2[l] + 1 / gam1[k]))
+            SUM_K += sum(NUM / DEN)
+        return SUM_K + (omega0[i] - 1) / omega[i] + gam
+    
+    def func(self,x,omega0,r1,sigma2,gam1):
+        y = np.zeros(self.L+1)
+        omega = x[:self.L]
+        gam = x[self.L]
+
+        for i in range(self.L):
+            y[i] = self.log_likelihood_der(i,omega0,omega,r1,sigma2,gam,gam1)
+            
+        y[self.L] = sum(omega) - 1.0 
+        return y
+
+    def prior_update_mle(self,r1s, gam1s ):
+        rank = self.comm.Get_rank()
+
+        omega0 = np.zeros(self.L)
+        omega0[0] = 1 - self.lam
+        omega0[1:] = self.lam * self.omegas
+
+        sigma2 = np.zeros(self.L)
+        sigma2[0] = 1e-16
+        sigma2[1:] = self.sigmas
+
+        x0 = np.zeros(self.L + 1)
+        x0[:-1] = omega0
+        x0[-1] = 1
+
+        x, _, ier, _ = scipy.optimize.fsolve(func=self.func, x0=x0, args=(omega0,r1s,sigma2,gam1s), full_output=True)
+       
+       if ier != 1:
+            if rank == 0:
+                logging.info(f"WARNING: fsolve not converged. No prior update!")
+            return
+        else:
+            x[:-1] /= sum(x[:-1])
+            self.lam = 1 - x[0]
+            self.omegas = np.array([ w / sum(x[1:-1]) for w in x[1:-1]])
+
+    def infer(self,R,r,iterations, x0, cg_maxit=500,learn_gamw=True, lmmse_damp=True):
 
         # Initialization
+        M = self.M
+        N = self.N
         rank = self.comm.Get_rank()
         r = r.reshape((M,1))
         r1 = r.reshape((M,1))
@@ -142,6 +194,17 @@ class VAMP:
 
             if rank == 0:
                 logging.info(f"...Data from all ranks collected")
+
+            # Update prior
+            if it > 0:
+                if rank == 0:
+                    logging.info("...Updating prior parameters")
+                self.prior_update_mle(r1s, gam1s)
+            
+            if rank == 0:
+                logging.debug(f"lam={self.lam}")
+                logging.debug(f"omegas={self.omegas}")
+                logging.debug(f"sigmas={self.sigmas}")
 
             # Denoising
             if rank == 0:
@@ -243,7 +306,7 @@ class VAMP:
                 logging.debug(f"gamw = {gamw:0.9f} \n")
 
             # Write parameters for current cohort to csv file
-            self.write_params_to_file([it, gamw, gam1, gam2, alpha1, alpha2], rank)
+            self.write_params_to_file([it, gamw, gam1, gam2, alpha1, alpha2, self.lam], rank)
 
             # Calculate error metrics
             alignment = np.inner(xhat1.squeeze(), x0.squeeze()) / np.linalg.norm(xhat1.squeeze()) / np.linalg.norm(x0.squeeze()) # Alignment
