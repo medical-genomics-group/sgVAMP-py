@@ -41,6 +41,7 @@ parser.add_argument("-learn_gamw", "--learn-gamw", help = "Learn or fix gamw", d
 parser.add_argument("-rho", "--rho", help = "Damping factor rho", default=0.5)
 parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", default=500)
 parser.add_argument("-s", "--s",  help = "Rused = (1-s) * R + s * Id", default=0.1)
+parser.add_argument("-mle_prior_update", "--mle-prior-update",  help = "Learning prior probabilites using MLE", default=True)
 args = parser.parse_args()
 
 # Input parameters
@@ -64,6 +65,7 @@ learn_gamw = bool(int(args.learn_gamw)) # wheter to learn or not gamw
 cg_maxit = int(args.cg_maxit) # CG max iterations
 rho = float(args.rho) # damping
 s = float(args.s) # regularization parameter for the correlation matrix
+mle_prior_update = bool(int(args.mle_prior_update))
 
 ld_fpaths_list = ld_fpaths.split(",")
 r_fpaths_list = r_fpaths.split(",")
@@ -102,7 +104,8 @@ if rank == 0:
     logging.info(f"--learn-gamw {learn_gamw}")
     logging.info(f"--rho {rho}")
     logging.info(f"--cg-maxit {cg_maxit}")
-    logging.info(f"--s {s}\n")
+    logging.info(f"--s {s}")
+    logging.info(f"--mle-prior-update {mle_prior_update}\n")
 
 # Loading LD matrix and XTy vector
 if rank == 0:
@@ -150,7 +153,9 @@ if rank == 0:
 a = np.array(N_list) / sum(N_list) # scaling factor for group
 
 # multi-cohort sgVAMP init
-sgvamp = VAMP(  K=K,
+sgvamp = VAMP(  N=N,
+                M=M,
+                K=K,
                 rho=rho, 
                 gam1=gam1, 
                 gamw=gamw,
@@ -168,14 +173,13 @@ if rank == 0:
 ts = time.time()
 
 xhat1 = sgvamp.infer(   R, 
-                        r, 
-                        M, 
-                        N, 
+                        r,
                         iterations,
                         x0=x0,
                         cg_maxit=cg_maxit, 
                         learn_gamw=learn_gamw, 
-                        lmmse_damp=lmmse_damp)
+                        lmmse_damp=lmmse_damp,
+                        mle_prior_update=mle_prior_update)
 te = time.time()
 
 # Print running time
