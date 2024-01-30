@@ -34,6 +34,7 @@ python3 ${sloc}/main.py [Input options]
 | `--rho` | Damping factor rho |
 | `--cg-maxit` | CG max iterations |
 | `--s` | Rused = (1-s) * R + s * Id |
+| `--mle-prior-update` | Updating prior using MLE |
 
 # Output files
 Signal estimates over iterations are stored in binary files: ``{out_dir}/{out_name}__xhat_it_{it}.bin``
