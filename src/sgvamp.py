@@ -103,29 +103,53 @@ class VAMP:
         DerNum = self.lam * sum( self.omegas * EXP * (mu_meta * mu_meta + sigma2_meta) * self.a[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
         DerDen = self.lam * sum( self.omegas * mu_meta * EXP * self.a[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
         return (DerNum * Den - DerDen * Num) / (Den * Den)
-
-    def log_likelihood_der(self, i, omega0, omega, r1, sigma2, gam, gam1):
-        SUM_K = 0
-        for k in range(self.K):
-            NUM = self.a[self.comm.Get_rank()] * scipy.stats.norm.pdf(r1[k,:], 0.0, scale=np.sqrt(sigma2[i] + 1 / gam1[k]))
-            DEN = np.zeros(self.M)
-            for l in range(self.L):
-                DEN += omega[l] * scipy.stats.norm.pdf(r1[k,:], 0.0, scale=np.sqrt(sigma2[l] + 1 / gam1[k]))
-            SUM_K += sum(NUM / DEN)
-        return SUM_K + (omega0[i] - 1) / omega[i] + gam
     
-    def func(self,x,omega0,r1,sigma2,gam1):
+    def prior_update_em(self, r1s, gam1s):
+        # r1s is a (K,M) numpy matrix
+        # gam1s is a (K,) numpy array
+
+        # converting to the right dimension
+        Lm1 = self.L -1 
+        prior_vars0 = self.sigmas.reshape(1, 1, Lm1)
+        gam1s_rs = gam1s.reshape(self.K, 1, 1)
+        gam1invs = 1.0/gam1s_rs
+        r1s_rs = r1s.reshape(self.K, self.M, 1)
+
+        exp_max = ( -np.power(r1s_rs,2).reshape(self.K, self.M, 1) / 2 / (prior_vars0 + gam1invs) ).max()
+        xi = self.lam * self.omegas.reshape(1, 1, Lm1) * np.exp(- np.power(r1s_rs,2).reshape(self.K, self.M, 1) / 2 / (prior_vars0 + gam1invs) - exp_max) / np.sqrt(gam1invs + prior_vars0)
+        sum_xi = xi.sum(axis=2).reshape(self.K, self.M,1)
+        xi_tilde = xi / sum_xi
+        pi = 1.0 / ( 1.0 + (1-self.lam) * np.exp(-np.power(r1s_rs,2) / 2 * gam1s_rs - exp_max) / np.sqrt(gam1invs) / sum_xi )
+        
+        #updating sparsity level
+        self.lam = np.mean( np.average(pi, axis=0, weights=self.a) )
+        #updating prior probabilities in the mixture
+        self.omegas = np.sum(pi * xi_tilde * self.a.reshape(self.K,1,1), axis = (0,1)) / np.sum(pi * self.a.reshape(self.K,1,1), axis = (0,1))
+
+
+    def Lagrangian_der(self, x, omega0, r1s, gam1s):
+        # r1s is a (K,M) numpy matrix
+        # gam1s is a (K,) numpy array
+        # omega0 is a (L,) numpy array
+
         y = np.zeros(self.L+1)
         omega = x[:self.L]
         gam = x[self.L]
+        Lm1 = self.L -1 
+        prior_vars0 = self.sigmas.reshape(1, 1, Lm1)
+        gam1s_rs = gam1s.reshape(self.K, 1, 1)
+        gam1invs = 1.0/gam1s_rs
+        r1s_rs = r1s.reshape(self.K, self.M, 1)
 
-        for i in range(self.L):
-            y[i] = self.log_likelihood_der(i,omega0,omega,r1,sigma2,gam,gam1)
-
+        exp_max = ( -np.power(r1s_rs,2).reshape(self.K, self.M, 1) / 2 / (prior_vars0 + gam1invs) ).max()
+        probs = np.exp(-np.power(r1s_rs,2) / 2 / (prior_vars0 + 1.0 / gam1s) - exp_max) / np.sqrt(prior_vars0 + gam1invs)
+        Num = self.a.reshape(self.K,1,1) * probs
+        Den = np.sum(probs * omega.reshape(1,1,Lm1), axis=2)
+        y[:self.L] = np.sum(Num/Den, axis=(0,1)) + (omega0-1) / omega + gam
         y[self.L] = sum(omega) - 1.0 
         return y
 
-    def prior_update_mle(self,r1s, gam1s ):
+    def prior_update_mle(self, r1s, gam1s):
         rank = self.comm.Get_rank()
 
         omega0 = np.zeros(self.L)
@@ -140,8 +164,8 @@ class VAMP:
         x0[:-1] = omega0
         x0[-1] = 1
 
-        x, _, ier, _ = scipy.optimize.fsolve(func=self.func, x0=x0, args=(omega0,r1s,sigma2,gam1s), full_output=True)
-       
+        x, _, ier, _ = scipy.optimize.fsolve(func=self.Lagrangian_der, x0=x0, args=(omega0,r1s,gam1s), full_output=True)
+
         if ier != 1:
             if rank == 0:
                 logging.info(f"WARNING: fsolve not converged. No prior update!")
@@ -151,7 +175,7 @@ class VAMP:
             self.lam = 1 - x[0]
             self.omegas = np.array([ w / sum(x[1:-1]) for w in x[1:-1]])
 
-    def infer(self,R,r,iterations, x0, cg_maxit=500,learn_gamw=True, lmmse_damp=True, mle_prior_update=True):
+    def infer(self,R,r,iterations, x0, cg_maxit=500, em_prior_maxit=100, learn_gamw=True, lmmse_damp=True, prior_update=None):
 
         # Initialization
         M = self.M
@@ -196,10 +220,24 @@ class VAMP:
                 logging.info(f"...Data from all ranks collected")
 
             # Update prior
-            if it > 0 and mle_prior_update:
-                if rank == 0:
-                    logging.info("...Updating prior parameters using MLE")
-                self.prior_update_mle(r1s, gam1s)
+            if it > 0: 
+                if prior_update == "mle":
+                    if rank == 0:
+                        logging.info("...Updating prior parameters using MLE")
+                    self.prior_update_mle(r1s, gam1s)
+                elif prior_update == "em":
+                    if rank == 0:
+                        logging.info("...Updating prior parameters using EM")
+                    for em_it in range(em_prior_maxit):
+                        old_omegas = self.omegas
+                        old_lam = self.lam
+                        self.prior_update_em(r1s, gam1s)
+                        omegas_rel_err = np.linalg.norm(self.omegas - old_omegas) / np.linalg.norm(old_omegas)
+                        lam_rel_err = np.abs(self.lam - old_lam) / self.lam
+                        if  omegas_rel_err < 1e-6 and lam_rel_err < 1e-6:
+                            break
+                    if rank == 0:
+                        logging.info(f"... prior-learning EM algorithm performed {em_it+1} steps and had final relative error = {max(omegas_rel_err,lam_rel_err):0.9f}")
             
             if rank == 0:
                 logging.debug(f"lam={self.lam}")
