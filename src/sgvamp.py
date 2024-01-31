@@ -175,6 +175,10 @@ class VAMP:
             if rank == 0:
                 logging.info(f"WARNING: fsolve not converged. No prior update!")
             return
+        elif any(x[:-1]) < 0:
+            if rank == 0:
+                logging.info(f"WARNING: Negative values in MLE. No prior update!")
+            return
         else:
             x[:-1] /= sum(x[:-1])
             self.lam = 1 - x[0]
