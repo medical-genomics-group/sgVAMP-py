@@ -126,27 +126,26 @@ class VAMP:
         #updating prior probabilities in the mixture
         self.omegas = np.sum(pi * xi_tilde * self.a.reshape(self.K,1,1), axis = (0,1)) / np.sum(pi * self.a.reshape(self.K,1,1), axis = (0,1))
 
-    def log_likelihood_der(self, i, omega0, omega, r1, sigma2, gam, gam1):
-        SUM_K = 0
-        for k in range(self.K):
-            NUM = self.a[self.comm.Get_rank()] * scipy.stats.norm.pdf(r1[k,:], 0.0, scale=np.sqrt(sigma2[i] + 1 / gam1[k]))
-            # exp_max = ( -np.power(r1[k,:],2) / 2 / (sigma2[i] + 1 / gam1[k]) ).max()
-            # NUM = self.a[self.comm.Get_rank()] * np.exp(-np.power(r1[k,:],2) / 2 / (sigma2[i] + 1 / gam1[k]) - exp_max) / np.sqrt(sigma2[i] + 1 / gam1[k])
-            DEN = np.zeros(self.M)
-            for l in range(self.L):
-                DEN += omega[l] * scipy.stats.norm.pdf(r1[k,:], 0.0, scale=np.sqrt(sigma2[l] + 1 / gam1[k]))
-                # DEN += omega[l] * np.exp(-np.power(r1[k,:],2) / 2 / (sigma2[i] + 1 / gam1[k]) - exp_max) / np.sqrt(sigma2[i] + 1 / gam1[k])
-            SUM_K += sum(NUM / DEN)
-        return SUM_K + (omega0[i] - 1) / omega[i] + gam
-    
-    def Lagrangian_der(self, x, omega0, r1, sigma2, gam1):
+
+    def Lagrangian_der(self, x, omega0, r1s, gam1s):
+        # r1s is a (K,M) numpy matrix
+        # gam1s is a (K,) numpy array
+        # omega0 is a (L,) numpy array
+
         y = np.zeros(self.L+1)
         omega = x[:self.L]
         gam = x[self.L]
+        Lm1 = self.L -1 
+        prior_vars0 = self.sigmas.reshape(1, 1, Lm1)
+        gam1s_rs = gam1s.reshape(self.K, 1, 1)
+        gam1invs = 1.0/gam1s_rs
+        r1s_rs = r1s.reshape(self.K, self.M, 1)
 
-        for i in range(self.L):
-            y[i] = self.log_likelihood_der(i, omega0, omega, r1, sigma2, gam, gam1)
-
+        exp_max = ( -np.power(r1s_rs,2).reshape(self.K, self.M, 1) / 2 / (prior_vars0 + gam1invs) ).max()
+        probs = np.exp(-np.power(r1s_rs,2) / 2 / (prior_vars0 + 1.0 / gam1s) - exp_max) / np.sqrt(prior_vars0 + gam1invs)
+        Num = self.a.reshape(self.K,1,1) * probs
+        Den = np.sum(probs * omega.reshape(1,1,Lm1), axis=2)
+        y[:self.L] = np.sum(Num/Den, axis=(0,1)) + (omega0-1) / omega + gam
         y[self.L] = sum(omega) - 1.0 
         return y
 
@@ -165,7 +164,7 @@ class VAMP:
         x0[:-1] = omega0
         x0[-1] = 1
 
-        x, _, ier, _ = scipy.optimize.fsolve(func=self.Lagrangian_der, x0=x0, args=(omega0,r1s,sigma2,gam1s), full_output=True)
+        x, _, ier, _ = scipy.optimize.fsolve(func=self.Lagrangian_der, x0=x0, args=(omega0,r1s,gam1s), full_output=True)
 
         if ier != 1:
             if rank == 0:
