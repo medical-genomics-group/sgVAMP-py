@@ -41,7 +41,8 @@ parser.add_argument("-learn_gamw", "--learn-gamw", help = "Learn or fix gamw", d
 parser.add_argument("-rho", "--rho", help = "Damping factor rho", default=0.5)
 parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", default=500)
 parser.add_argument("-s", "--s",  help = "Rused = (1-s) * R + s * Id", default=0.1)
-parser.add_argument("-mle_prior_update", "--mle-prior-update",  help = "Learning prior probabilites using MLE", default=True)
+parser.add_argument("-prior_update", "--prior-update",  help = "Learning prior probabilites", default=None)
+parser.add_argument("-em_prior_maxit", "--em-prior-maxit",  help = "Maximal number of iterations that prior-learning EM is allowed to perform", default=100)
 args = parser.parse_args()
 
 # Input parameters
@@ -65,7 +66,8 @@ learn_gamw = bool(int(args.learn_gamw)) # wheter to learn or not gamw
 cg_maxit = int(args.cg_maxit) # CG max iterations
 rho = float(args.rho) # damping
 s = float(args.s) # regularization parameter for the correlation matrix
-mle_prior_update = bool(int(args.mle_prior_update))
+prior_update = args.prior_update # whether or not to update prior probabilities
+em_prior_maxit = int(args.em_prior_maxit) # prior-learning EM max iterations
 
 ld_fpaths_list = ld_fpaths.split(",")
 r_fpaths_list = r_fpaths.split(",")
@@ -105,7 +107,9 @@ if rank == 0:
     logging.info(f"--rho {rho}")
     logging.info(f"--cg-maxit {cg_maxit}")
     logging.info(f"--s {s}")
-    logging.info(f"--mle-prior-update {mle_prior_update}\n")
+    logging.info(f"--prior-update {prior_update}\n")
+    if prior_update == "em":
+        logging.info(f"--em_prior_maxit {em_prior_maxit}\n")
 
 # Loading LD matrix and XTy vector
 if rank == 0:
@@ -177,9 +181,10 @@ xhat1 = sgvamp.infer(   R,
                         iterations,
                         x0=x0,
                         cg_maxit=cg_maxit, 
+                        em_prior_maxit = em_prior_maxit,
                         learn_gamw=learn_gamw, 
                         lmmse_damp=lmmse_damp,
-                        mle_prior_update=mle_prior_update)
+                        prior_update=prior_update)
 te = time.time()
 
 # Print running time
