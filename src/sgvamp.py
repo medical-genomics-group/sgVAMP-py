@@ -170,10 +170,14 @@ class VAMP:
             x0[-1] = self.gam
 
         x, _, ier, _ = scipy.optimize.fsolve(func=self.Lagrangian_der, x0=x0, args=(omega0,sigma2,r1s,gam1s), full_output=True)
-
+        #logging.debug(f"x={x}")
         if ier != 1:
             if rank == 0:
                 logging.info(f"WARNING: fsolve not converged. No prior update!")
+            return
+        elif any(s <= 0 for s in x[:-1]):
+            if rank == 0:
+                logging.info(f"WARNING: Negative values in MLE. No prior update!")
             return
         else:
             x[:-1] /= sum(x[:-1])
