@@ -357,12 +357,13 @@ class VAMP:
             self.write_params_to_file([it, gamw, gam1, gam2, alpha1, alpha2, self.lam], rank)
 
             # Calculate error metrics
-            alignment = np.inner(xhat1.squeeze(), x0.squeeze()) / np.linalg.norm(xhat1.squeeze()) / np.linalg.norm(x0.squeeze()) # Alignment
-            l2 = np.linalg.norm(xhat1.squeeze() - x0.squeeze()) / np.linalg.norm(x0.squeeze()) # L2 norm error
-        
-            if rank==0:
-                logging.debug(f"Alignment(xhat1, x0) = {alignment:0.9f} \n")
-                logging.debug(f"L2_error(xhat1, x0) = {l2:0.9f} \n")
-                self.write_metrics_to_file([it, alignment, l2])
+            if x0!=None:
+                alignment = np.inner(xhat1.squeeze(), x0.squeeze()) / np.linalg.norm(xhat1.squeeze()) / np.linalg.norm(x0.squeeze()) # Alignment
+                l2 = np.linalg.norm(xhat1.squeeze() - x0.squeeze()) / np.linalg.norm(x0.squeeze()) # L2 norm error
+            
+                if rank==0:
+                    logging.debug(f"Alignment(xhat1, x0) = {alignment:0.9f} \n")
+                    logging.debug(f"L2_error(xhat1, x0) = {l2:0.9f} \n")
+                    self.write_metrics_to_file([it, alignment, l2])
 
         return xhat1s
