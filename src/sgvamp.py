@@ -116,9 +116,9 @@ class VAMP:
         gam1invs = 1.0/gam1s_rs
         r1s_rs = r1s.reshape(self.K, self.M, 1)
 
-        exp_max = ( -np.power(r1s_rs,2).reshape(self.K, self.M, 1) / 2 / (prior_vars0 + gam1invs) ).max()
+        exp_max = ( -np.power(r1s_rs,2).reshape(self.K, self.M, 1) / 2 / (prior_vars0 + gam1invs) ).max(axis=2).reshape(self.K, self.M, 1)
         xi = self.lam * self.omegas.reshape(1, 1, Lm1) * np.exp(- np.power(r1s_rs,2).reshape(self.K, self.M, 1) / 2 / (prior_vars0 + gam1invs) - exp_max) / np.sqrt(gam1invs + prior_vars0)
-        sum_xi = xi.sum(axis=2).reshape(self.K, self.M,1)
+        sum_xi = xi.sum(axis=2).reshape(self.K, self.M, 1)
         xi_tilde = xi / sum_xi
         pi = 1.0 / ( 1.0 + (1-self.lam) * np.exp(-np.power(r1s_rs,2) / 2 * gam1s_rs - exp_max) / np.sqrt(gam1invs) / sum_xi )
         
@@ -272,9 +272,9 @@ class VAMP:
                 self.write_xhat_to_file(it, xhat1)
 
             alpha1 = np.mean(np.array([self.der_denoiser_meta(r1s[:,j], gam1s) for j in range(M)]))
-            delta = 1 - np.log(2*alpha1)
-            if alpha1<0.5:
-                alpha1 *= delta
+            # delta = 1 - np.log(2*alpha1)
+            # if alpha1<0.5:
+                # alpha1 *= delta
 
             if it > 0:
                 alpha1 = rho * alpha1 + (1 - rho) * alpha1_prev # apply damping on alpha1
@@ -339,6 +339,10 @@ class VAMP:
             if learn_gamw:
 
                 z = N - (2 * xhat2.T @ r) + (xhat2.T @ R @ xhat2)
+                if z < 0:
+                    z = 0
+                # z = np.power( np.linalg.norm(r.squeeze() - (R @ xhat2).squeeze()), 2.0 )
+                    
 
                 # Hutchinson trace estimator
                 TrRSigma2 = u.T @ R @ Sigma2_u # u^T @ R @ [(gamw * R + gam2 * I)^(-1) @ u]
@@ -348,16 +352,22 @@ class VAMP:
                 gamw = 1 / (z / N + TrRSigma2 / N)
                 gamw = float(gamw.squeeze())
                 # gamw = rho * gamw + (1 - rho) * gamw_prev # damping on gamw
-                gamws.append(gamw)
+                # if rank==0:
+                    # logging.debug(f"TrRSigma2 / N= {TrRSigma2/N}")
+                    # logging.debug(f"z / N= {z/N}")
 
             if rank==0:
                 logging.debug(f"gamw = {gamw:0.9f} \n")
+
+            gamws.append(gamw)
+            gamw = max(gamw, 1.0)
+            
 
             # Write parameters for current cohort to csv file
             self.write_params_to_file([it, gamw, gam1, gam2, alpha1, alpha2, self.lam], rank)
 
             # Calculate error metrics
-            if x0!=None:
+            if len(x0)>0:
                 alignment = np.inner(xhat1.squeeze(), x0.squeeze()) / np.linalg.norm(xhat1.squeeze()) / np.linalg.norm(x0.squeeze()) # Alignment
                 l2 = np.linalg.norm(xhat1.squeeze() - x0.squeeze()) / np.linalg.norm(x0.squeeze()) # L2 norm error
             

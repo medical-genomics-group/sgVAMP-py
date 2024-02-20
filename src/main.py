@@ -24,7 +24,7 @@ if rank == 0:
 parser = argparse.ArgumentParser()
 parser.add_argument("-ld_files", "--ld-files", help = "Path to LD matrices in .npz files, separated by comma ")
 parser.add_argument("-r_files", "--r-files", help = "Path to XTy .npy files separated by comma")
-parser.add_argument("-true_signal_file", "--true-signal-file", help = "Path to true signal .npy file")
+parser.add_argument("-true_signal_file", "--true-signal-file", help = "Path to true signal .npy file", default=None)
 parser.add_argument("-out_dir", "--out-dir", help = "Output directory")
 parser.add_argument("-out_name", "--out-name", help = "Output file name")
 parser.add_argument("-N", "--N", help = "Number of samples in each cohort, saparated by comma")
@@ -141,7 +141,7 @@ logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 
 # Loading true signals
 if true_signal_fpath==None:
-    x0 = None
+    x0 = np.array([])
 elif true_signal_fpath.endswith(".bin"):
     f = open(true_signal_fpath, "rb")
     buffer = f.read(M * 8)
@@ -152,7 +152,7 @@ elif true_signal_fpath.endswith(".npy"):
     x0 = np.load(true_signal_fpath)
     x0 *= np.sqrt(N) 
 
-if rank == 0 and x0!=None:
+if rank == 0 and len(x0)>0:
     logging.info(f"True signals loaded. Shape: {x0.shape}\n")
 
 a = np.array(N_list) / sum(N_list) # scaling factor for group
@@ -196,7 +196,7 @@ if rank == 0:
 alignments = []
 l2s = []
 
-if x0 != None:
+if len(x0) > 0:
     for it in range(iterations):
         alignment = np.inner(xhat1[it].squeeze(), x0.squeeze()) / np.linalg.norm(xhat1[it].squeeze()) / np.linalg.norm(x0.squeeze())
         alignments.append(alignment)
