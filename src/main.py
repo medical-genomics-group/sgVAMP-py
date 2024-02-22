@@ -127,8 +127,6 @@ else:
 
 logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
 
-R /= N # scaling R for stability
-
 R = (1-s) * R + s * scipy.sparse.identity(M) # R regularization
 
 if r_fpath.endswith('.txt'):
@@ -139,9 +137,6 @@ else:
     raise Exception("Unsupported XTy vector format!")
 
 logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
-
-r /= np.sqrt(N) # scaling r for stability
-
 
 # Loading true signals
 x0 = np.zeros(M)
