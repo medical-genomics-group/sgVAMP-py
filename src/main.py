@@ -127,7 +127,9 @@ else:
 
 logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
 
-R = (1-s) * R + s * scipy.sparse.identity(M)
+R /= N # scaling R for stability
+
+R = (1-s) * R + s * scipy.sparse.identity(M) # R regularization
 
 if r_fpath.endswith('.txt'):
     r = np.loadtxt(r_fpath).reshape((M,1))
@@ -138,7 +140,7 @@ else:
 
 logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 
-
+r /= np.sqrt(N) # scaling r for stability
 
 # Loading true signals
 x0 = np.zeros(M)
