@@ -142,6 +142,7 @@ logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 
 r /= np.sqrt(N) # scaling r for stability
 
+
 # Loading true signals
 x0 = np.zeros(M)
 if true_signal_fpath != None:
