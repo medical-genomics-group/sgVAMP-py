@@ -84,9 +84,9 @@ class VAMP:
         ratio = gam1 / (gam1 + 1.0/self.sigmas) * B / (A + B + self.eps) + BoverAplusBder * r * gam1 / (gam1 + 1.0/self.sigmas)
         return ratio
 
-    def denoiser_meta(self, rs, gam1s, included=None):
+    def denoiser_meta(self, rs, gam1s, included):
         # gam1s = a vector of gam1 values over different GWAS studies
-        if included==None:
+        if len(included)==0:
             a_tilde=self.a
         else:
             a_tilde=self.a * included / sum(self.a * included)
@@ -99,8 +99,8 @@ class VAMP:
         Den = (1-self.lam) * EXP2 + self.lam * sum(self.omegas * EXP * np.sqrt(sigma2_meta / self.sigmas))
         return Num/Den
 
-    def der_denoiser_meta(self, rs, gam1s, included=None):
-        if included==None:
+    def der_denoiser_meta(self, rs, gam1s, included):
+        if len(included)==0:
             a_tilde=self.a
         else:
             a_tilde=self.a * included / sum(self.a * included)
@@ -115,7 +115,7 @@ class VAMP:
         DerDen = self.lam * sum( self.omegas * mu_meta * EXP * a_tilde[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
         return (DerNum * Den - DerDen * Num) / (Den * Den)
     
-    def prior_update_em(self, r1s, gam1s, included=None):
+    def prior_update_em(self, r1s, gam1s):
         # r1s is a (K,Mmax) numpy matrix
         # gam1s is a (K,) numpy array
 
@@ -133,13 +133,13 @@ class VAMP:
         pi = 1.0 / ( 1.0 + (1-self.lam) * np.exp(-np.power(r1s_rs,2) / 2 * gam1s_rs - exp_max) / np.sqrt(gam1invs) / sum_xi )
         
         
-        if included == None:
+        if len(self.included_snps)==0:
             #updating sparsity level
             self.lam = np.mean( np.average(pi, axis=0, weights=self.a) )
             #updating prior probabilities in the mixture
             self.omegas = np.sum(pi * xi_tilde * self.a.reshape(self.K,1,1), axis = (0,1)) / np.sum(pi * self.a.reshape(self.K,1,1), axis = (0,1))
         else:
-            a_included_norm = included.reshape(self.K, self.Mmax, 1) * self.a.reshape(self.K, 1, 1)
+            a_included_norm = self.included_snps.reshape(self.K, self.Mmax, 1) * self.a.reshape(self.K, 1, 1)
             a_included_norm = a_included_norm / np.sum(a_included_norm, axis=0)
             self.lam = np.mean( pi * a_included_norm )  
             self.omegas = np.sum(pi * xi_tilde * a_included_norm, axis = (0,1)) / np.sum(pi * a_included_norm, axis = (0,1))
@@ -236,7 +236,7 @@ class VAMP:
             # Collect gam1s and r1s
             #logging.info(f"rank {rank}: gam1={gam1}")
             gam1s[rank] = gam1
-            if self.included_snps != None:
+            if len(self.included_snps)>0:
                 forward_map = self.included_snps
                 backward_map = [np.nonzero(forward_map[k,:]) for k in range(self.K)]
             r1s[rank,backward_map[rank]] = r1.squeeze()
@@ -283,8 +283,8 @@ class VAMP:
             xhat1_prev = xhat1
             alpha1_prev = alpha1
 
-            if self.included_snps == None:
-                xhat1 = np.array([self.denoiser_meta(r1s[:,j], gam1s) for j in range(M)]).reshape((M,1))
+            if len(self.included_snps)>0:
+                xhat1 = np.array([self.denoiser_meta(r1s[:,j], gam1s, included=np.array([])) for j in range(M)]).reshape((M,1))
             else:
                 xhat1 = np.array([self.denoiser_meta(r1s[:,backward_map[rank][j]], gam1s, included=forward_map[backward_map[rank][j]]) for j in range(M)]).reshape((M,1))
                 

@@ -140,7 +140,8 @@ else:
 
 logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
 
-R = (1-s) * R + s * scipy.sparse.identity(M)
+if s>0:
+    R = (1-s) * R + s * scipy.sparse.identity(M)
 
 if r_fpath.endswith('.txt'):
     r = np.loadtxt(r_fpath).reshape((M,1))
@@ -181,7 +182,7 @@ if snp_fpaths!=None:
     included_snps  = snps_df.to_numpy()
     included_snps = included_snps.transpose()
 else:
-    included_snps = None
+    included_snps = np.array([])
     
 
 a = np.array(N_list) / sum(N_list) # scaling factor for group
