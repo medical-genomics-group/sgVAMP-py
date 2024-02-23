@@ -7,6 +7,7 @@ import argparse
 import scipy
 import struct
 import logging
+import pandas as pd
 from mpi4py import MPI
 
 # Initializing MPI processes
@@ -28,7 +29,7 @@ parser.add_argument("-true_signal_file", "--true-signal-file", help = "Path to t
 parser.add_argument("-out_dir", "--out-dir", help = "Output directory")
 parser.add_argument("-out_name", "--out-name", help = "Output file name")
 parser.add_argument("-N", "--N", help = "Number of samples in each cohort, saparated by comma")
-parser.add_argument("-M", "--M", help = "Number of markers")
+parser.add_argument("-M", "--M", help = "Number of markers in each cohort, separated by comma")
 parser.add_argument("-K", "--K", help = "Number of cohorts", default=1)
 parser.add_argument("-L", "--L", help = "Number of prior mixture components", default=2)
 parser.add_argument("-iterations", "--iterations", help = "Number of iterations", default=10)
@@ -43,6 +44,7 @@ parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", defau
 parser.add_argument("-s", "--s",  help = "Rused = (1-s) * R + s * Id", default=0.1)
 parser.add_argument("-prior_update", "--prior-update",  help = "Learning prior probabilites", default=None)
 parser.add_argument("-em_prior_maxit", "--em-prior-maxit",  help = "Maximal number of iterations that prior-learning EM is allowed to perform", default=100)
+parser.add_argument("-snp_files", "--snp-files",  help = "Path to file containing list of snps separated by comma", default=None)
 args = parser.parse_args()
 
 # Input parameters
@@ -51,7 +53,7 @@ r_fpaths = args.r_files
 true_signal_fpath = args.true_signal_file
 out_dir = args.out_dir
 out_name = args.out_name
-M = int(args.M) # Number of markers
+Ms = args.M # Number of markers
 Ns = args.N # Number of samples
 iterations = int(args.iterations)
 K = int(args.K)
@@ -68,11 +70,21 @@ rho = float(args.rho) # damping
 s = float(args.s) # regularization parameter for the correlation matrix
 prior_update = args.prior_update # whether or not to update prior probabilities
 em_prior_maxit = int(args.em_prior_maxit) # prior-learning EM max iterations
+snp_fpaths = args.snp_files
 
 ld_fpaths_list = ld_fpaths.split(",")
 r_fpaths_list = r_fpaths.split(",")
+if snp_fpaths!=None:
+    snp_fpaths_list = snp_fpaths.split(",")
 N_list = [int(n) for n in Ns.split(",")]
+M_list = [int(m) for m in Ms.split(",")]
 N = N_list[rank]
+if len(M_list)==K and K>1:
+    M = M_list[rank]
+    Mmax = max(M_list)
+else:
+    M = M_list[0]
+    Mmax = M_list[0]
 prior_vars_list = [float(x) for x in prior_vars.split(",")] # variance groups for the prior distribution
 prior_probs_list = [float(x) for x in prior_probs.split(",")] # probability groups for the prior distribution
 
@@ -94,7 +106,7 @@ if rank == 0:
     logging.info(f"--out-dir {out_dir}")
     logging.info(f"--true-signal-file {true_signal_fpath}")
     logging.info(f"--N {Ns}")
-    logging.info(f"--M {M}")
+    logging.info(f"--M {Ms}")
     logging.info(f"--K {K}")
     logging.info(f"--L {L}")
     logging.info(f"--iterations {iterations}")
@@ -110,6 +122,7 @@ if rank == 0:
     logging.info(f"--prior-update {prior_update}")
     if prior_update == "em":
         logging.info(f"--em_prior_maxit {em_prior_maxit}\n")
+    logging.info(f"--snps-lists {snp_fpaths}")
 
 # Loading LD matrix and XTy vector
 if rank == 0:
@@ -155,16 +168,34 @@ elif true_signal_fpath.endswith(".npy"):
 if rank == 0 and len(x0)>0:
     logging.info(f"True signals loaded. Shape: {x0.shape}\n")
 
+if snp_fpaths!=None:
+    snps = []
+    for cohort, snp_fpath in enumerate(snp_fpaths_list):
+        with open(snp_fpath, 'r') as file:
+            snps.append( pd.DataFrame(file.read().splitlines(), columns=[str(cohort)]) )
+    snps_df = pd.merge(snps[0], snps[1], how='outer', left_index=True, right_index=True) #implicit assumption that K>2
+    for cohort in range(2, len(snp_fpaths_list)):
+        snps_df = pd.merge(snps_df, snps[cohort], how='outer', left_index=True, right_index=True)
+    snps_df = snps_df.fillna(0)
+    snps_df[snps_df!=0] = 1
+    included_snps  = snps_df.to_numpy()
+    included_snps = included_snps.transpose()
+else:
+    included_snps = None
+    
+
 a = np.array(N_list) / sum(N_list) # scaling factor for group
 
 # multi-cohort sgVAMP init
 sgvamp = VAMP(  N=N,
                 M=M,
+                Mmax = Mmax,
                 K=K,
                 rho=rho, 
                 gam1=gam1, 
                 gamw=gamw,
-                a=a, 
+                a=a,
+                included_snps = included_snps, 
                 prior_vars=prior_vars_list, 
                 prior_probs=prior_probs_list, 
                 out_dir=out_dir, 

@@ -12,16 +12,18 @@ import struct
 import logging
 
 class VAMP:
-    def __init__(self, N, M, K, rho, gamw, gam1, a, prior_vars, prior_probs, out_dir, out_name, comm):
+    def __init__(self, N, M, Mmax, K, rho, gamw, gam1, a, included_snps, prior_vars, prior_probs, out_dir, out_name, comm):
         self.eps = 1e-32
         self.N = N
         self.M = M
+        self.Mmax = Mmax
         self.K = K
         self.L = len(prior_probs)
         self.rho = rho
         self.gamw = gamw
         self.gam1 = gam1 #np.full(K, gam1)
         self.a = a
+        self.included_snps = included_snps # max(M_1, ..., M_K) x K table describing which snps are present in which cohort 
         self.lam = 1 - prior_probs[0]
         self.sigmas = np.array(prior_vars[1:]) # a vector containing variances of different groups except the first one, length = L-1
         self.omegas = np.array([ p / sum(prior_probs[1:]) for p in prior_probs[1:]])
@@ -82,10 +84,14 @@ class VAMP:
         ratio = gam1 / (gam1 + 1.0/self.sigmas) * B / (A + B + self.eps) + BoverAplusBder * r * gam1 / (gam1 + 1.0/self.sigmas)
         return ratio
 
-    def denoiser_meta(self, rs, gam1s):
+    def denoiser_meta(self, rs, gam1s, included=None):
         # gam1s = a vector of gam1 values over different GWAS studies
-        sigma2_meta = 1.0 / (sum(self.a * gam1s) + 1.0/self.sigmas)  # a vector of dimension L - 1
-        mu_meta = np.inner(rs, self.a * gam1s) * sigma2_meta
+        if included==None:
+            a_tilde=self.a
+        else:
+            a_tilde=self.a * included / sum(self.a * included)
+        sigma2_meta = 1.0 / (sum(a_tilde * gam1s) + 1.0/self.sigmas)  # a vector of dimension L - 1
+        mu_meta = np.inner(rs, a_tilde * gam1s) * sigma2_meta
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
         EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind]) )
         Num = self.lam * sum(self.omegas * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
@@ -93,20 +99,24 @@ class VAMP:
         Den = (1-self.lam) * EXP2 + self.lam * sum(self.omegas * EXP * np.sqrt(sigma2_meta / self.sigmas))
         return Num/Den
 
-    def der_denoiser_meta(self, rs, gam1s):
-        sigma2_meta = 1.0 / (sum(self.a * gam1s) + 1.0/ self.sigmas) # a numpy vector of dimension L - 1
-        mu_meta = np.inner(rs, self.a * gam1s) * sigma2_meta # a numpy vector of dimension L - 1
+    def der_denoiser_meta(self, rs, gam1s, included=None):
+        if included==None:
+            a_tilde=self.a
+        else:
+            a_tilde=self.a * included / sum(self.a * included)
+        sigma2_meta = 1.0 / (sum(a_tilde * gam1s) + 1.0/ self.sigmas) # a numpy vector of dimension L - 1
+        mu_meta = np.inner(rs, a_tilde * gam1s) * sigma2_meta # a numpy vector of dimension L - 1
         max_ind = (np.array( mu_meta * mu_meta / sigma2_meta)).argmax()
         EXP = np.exp(0.5 * (mu_meta * mu_meta * sigma2_meta[max_ind] - mu_meta[max_ind] * mu_meta[max_ind] * sigma2_meta) / ( sigma2_meta * sigma2_meta[max_ind]) )
         Num = self.lam * sum( self.omegas * EXP * mu_meta * np.sqrt(sigma2_meta / self.sigmas))
         EXP2 = np.exp(- 0.5 * ((mu_meta[max_ind])**2 / sigma2_meta[max_ind]))
         Den = (1- self.lam) * EXP2 + self.lam * sum( self.omegas * EXP * np.sqrt(sigma2_meta / self.sigmas))
-        DerNum = self.lam * sum( self.omegas * EXP * (mu_meta * mu_meta + sigma2_meta) * self.a[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
-        DerDen = self.lam * sum( self.omegas * mu_meta * EXP * self.a[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
+        DerNum = self.lam * sum( self.omegas * EXP * (mu_meta * mu_meta + sigma2_meta) * a_tilde[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
+        DerDen = self.lam * sum( self.omegas * mu_meta * EXP * a_tilde[self.comm.Get_rank()] * gam1s[self.comm.Get_rank()] * np.sqrt(sigma2_meta / self.sigmas) )
         return (DerNum * Den - DerDen * Num) / (Den * Den)
     
-    def prior_update_em(self, r1s, gam1s):
-        # r1s is a (K,M) numpy matrix
+    def prior_update_em(self, r1s, gam1s, included=None):
+        # r1s is a (K,Mmax) numpy matrix
         # gam1s is a (K,) numpy array
 
         # converting to the right dimension
@@ -114,21 +124,30 @@ class VAMP:
         prior_vars0 = self.sigmas.reshape(1, 1, Lm1)
         gam1s_rs = gam1s.reshape(self.K, 1, 1)
         gam1invs = 1.0/gam1s_rs
-        r1s_rs = r1s.reshape(self.K, self.M, 1)
+        r1s_rs = r1s.reshape(self.K, self.Mmax, 1)
 
-        exp_max = ( -np.power(r1s_rs,2).reshape(self.K, self.M, 1) / 2 / (prior_vars0 + gam1invs) ).max(axis=2).reshape(self.K, self.M, 1)
-        xi = self.lam * self.omegas.reshape(1, 1, Lm1) * np.exp(- np.power(r1s_rs,2).reshape(self.K, self.M, 1) / 2 / (prior_vars0 + gam1invs) - exp_max) / np.sqrt(gam1invs + prior_vars0)
-        sum_xi = xi.sum(axis=2).reshape(self.K, self.M, 1)
+        exp_max = ( -np.power(r1s_rs,2).reshape(self.K, self.Mmax, 1) / 2 / (prior_vars0 + gam1invs) ).max(axis=2).reshape(self.K, self.Mmax, 1)
+        xi = self.lam * self.omegas.reshape(1, 1, Lm1) * np.exp(- np.power(r1s_rs,2).reshape(self.K, self.Mmax, 1) / 2 / (prior_vars0 + gam1invs) - exp_max) / np.sqrt(gam1invs + prior_vars0)
+        sum_xi = xi.sum(axis=2).reshape(self.K, self.Mmax, 1)
         xi_tilde = xi / sum_xi
         pi = 1.0 / ( 1.0 + (1-self.lam) * np.exp(-np.power(r1s_rs,2) / 2 * gam1s_rs - exp_max) / np.sqrt(gam1invs) / sum_xi )
         
-        #updating sparsity level
-        self.lam = np.mean( np.average(pi, axis=0, weights=self.a) )
-        #updating prior probabilities in the mixture
-        self.omegas = np.sum(pi * xi_tilde * self.a.reshape(self.K,1,1), axis = (0,1)) / np.sum(pi * self.a.reshape(self.K,1,1), axis = (0,1))
+        
+        if included == None:
+            #updating sparsity level
+            self.lam = np.mean( np.average(pi, axis=0, weights=self.a) )
+            #updating prior probabilities in the mixture
+            self.omegas = np.sum(pi * xi_tilde * self.a.reshape(self.K,1,1), axis = (0,1)) / np.sum(pi * self.a.reshape(self.K,1,1), axis = (0,1))
+        else:
+            a_included_norm = included.reshape(self.K, self.Mmax, 1) * self.a.reshape(self.K, 1, 1)
+            a_included_norm = a_included_norm / np.sum(a_included_norm, axis=0)
+            self.lam = np.mean( pi * a_included_norm )  
+            self.omegas = np.sum(pi * xi_tilde * a_included_norm, axis = (0,1)) / np.sum(pi * a_included_norm, axis = (0,1))
+        
 
 
     def Lagrangian_der(self, x, omega0, sigma2, r1s, gam1s):
+        # different M's for different cohorts are currently not supported!
         # r1s is a (K,M) numpy matrix
         # gam1s is a (K,) numpy array
         # omega0 is a (L,) numpy array
@@ -193,7 +212,7 @@ class VAMP:
         rank = self.comm.Get_rank()
         r = r.reshape((M,1))
         r1 = r.reshape((M,1))
-        r1s = np.zeros((self.K, M))
+        r1s = np.zeros((self.K, self.Mmax))
         xhat1 = np.zeros((M,1)) # signal estimates in Denoising step
         xhat2 = np.zeros((M,1)) # signal estimates in LMMSE step
         Sigma2_u_prev = np.zeros((M,1))
@@ -217,7 +236,10 @@ class VAMP:
             # Collect gam1s and r1s
             #logging.info(f"rank {rank}: gam1={gam1}")
             gam1s[rank] = gam1
-            r1s[rank,:] = r1.squeeze()
+            if self.included_snps != None:
+                forward_map = self.included_snps
+                backward_map = [np.nonzero(forward_map[k,:]) for k in range(self.K)]
+            r1s[rank,backward_map[rank]] = r1.squeeze()
             for i in range(self.K):
                 #if i != rank:
                 gam1s[i] = self.comm.bcast(gam1s[i], root=i)
@@ -261,7 +283,11 @@ class VAMP:
             xhat1_prev = xhat1
             alpha1_prev = alpha1
 
-            xhat1 = np.array([self.denoiser_meta(r1s[:,j], gam1s) for j in range(M)]).reshape((M,1))
+            if self.included_snps == None:
+                xhat1 = np.array([self.denoiser_meta(r1s[:,j], gam1s) for j in range(M)]).reshape((M,1))
+            else:
+                xhat1 = np.array([self.denoiser_meta(r1s[:,backward_map[rank][j]], gam1s, included=forward_map[backward_map[rank][j]]) for j in range(M)]).reshape((M,1))
+                
 
             if it > 0:
                 xhat1 = rho * xhat1 + (1 - rho) * xhat1_prev # apply damping on xhat1
