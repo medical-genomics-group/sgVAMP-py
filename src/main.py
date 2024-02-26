@@ -154,6 +154,8 @@ if true_signal_fpath != None:
         raise Exception("Unsupported true signal format!")
     if rank == 0:
         logging.info(f"True signals loaded. Shape: {x0.shape}\n")
+else:
+    x0 = None
 
 a = np.array(N_list) / sum(N_list) # scaling factor for group
 
@@ -192,17 +194,18 @@ te = time.time()
 if rank == 0:
     logging.info(f"sgVAMP total running time: {(te - ts):0.4f}s\n")
 
-# Print metrics
-alignments = []
-l2s = []
+if x0 is not None:
+    # Print metrics
+    alignments = []
+    l2s = []
 
-for it in range(iterations):
-    alignment = np.inner(xhat1[it].squeeze(), x0.squeeze()) / np.linalg.norm(xhat1[it].squeeze()) / np.linalg.norm(x0.squeeze())
-    alignments.append(alignment)
-    l2 = np.linalg.norm(xhat1[it].squeeze() - x0.squeeze()) / np.linalg.norm(x0.squeeze()) # L2 norm error
-    l2s.append(l2)
-if rank == 0:
-    logging.info(f"Alignment(x1hat, x0) over iterations: \n {alignments}\n")
-    logging.info(f"L2 error(x1hat, x0) over iterations: \n {l2s}\n")
+    for it in range(iterations):
+        alignment = np.inner(xhat1[it].squeeze(), x0.squeeze()) / np.linalg.norm(xhat1[it].squeeze()) / np.linalg.norm(x0.squeeze())
+        alignments.append(alignment)
+        l2 = np.linalg.norm(xhat1[it].squeeze() - x0.squeeze()) / np.linalg.norm(x0.squeeze()) # L2 norm error
+        l2s.append(l2)
+    if rank == 0:
+        logging.info(f"Alignment(x1hat, x0) over iterations: \n {alignments}\n")
+        logging.info(f"L2 error(x1hat, x0) over iterations: \n {l2s}\n")
 
 MPI.Finalize()
