@@ -23,7 +23,7 @@ class VAMP:
         self.gam1 = gam1 #np.full(K, gam1)
         self.a = a
         self.lam = 1 - prior_probs[0]
-        self.sigmas = np.array(prior_vars[1:]) # a vector containing variances of different groups except the first one, length = L-1
+        self.sigmas = np.array(prior_vars[1:]) * N # a vector containing variances of different groups except the first one, length = L-1
         self.omegas = np.array([ p / sum(prior_probs[1:]) for p in prior_probs[1:]])
         self.setup_io(out_dir, out_name)
         self.comm = comm
@@ -269,7 +269,7 @@ class VAMP:
             xhat1s.append(xhat1)
             
             if rank == 0:
-                self.write_xhat_to_file(it, xhat1)
+                self.write_xhat_to_file(it, xhat1 / np.sqrt(N))
 
             alpha1 = np.mean(np.array([self.der_denoiser_meta(r1s[:,j], gam1s) for j in range(M)]))
             # delta = 1 - np.log(2*alpha1)
@@ -362,12 +362,11 @@ class VAMP:
             gamws.append(gamw)
             gamw = max(gamw, 1.0)
             
-
             # Write parameters for current cohort to csv file
             self.write_params_to_file([it, gamw, gam1, gam2, alpha1, alpha2, self.lam], rank)
 
-            # Calculate error metrics
-            if len(x0)>0:
+            if x0 is not None:
+                # Calculate error metrics
                 alignment = np.inner(xhat1.squeeze(), x0.squeeze()) / np.linalg.norm(xhat1.squeeze()) / np.linalg.norm(x0.squeeze()) # Alignment
                 l2 = np.linalg.norm(xhat1.squeeze() - x0.squeeze()) / np.linalg.norm(x0.squeeze()) # L2 norm error
             

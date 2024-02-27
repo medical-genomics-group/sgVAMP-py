@@ -30,6 +30,7 @@ gam1s = []
 gam2s = []
 alpha1s = []
 alpha2s = []
+lams = []
 its = []
 csv_file = open(csv_params_fpath, mode='r')
 csv_reader = csv.reader(csv_file, delimiter='\t')
@@ -41,6 +42,7 @@ for row in csv_reader:
     gam2s.append(float(row[3]))
     alpha1s.append(float(row[4]))
     alpha2s.append(float(row[5]))
+    lams.append(float(row[6]))
 
 iterations = max(its) + 1
 
@@ -61,16 +63,18 @@ print("Alignment (xhat1, x0) over iterations: \n", alignments, flush=True)
 print("gam2 over iterations: \n", gam2s, flush=True)
 
 plt.rcParams.update({'font.size': 15})
-fig, ax = plt.subplots(4,figsize=(12, 10), dpi=300)
+fig, ax = plt.subplots(5,figsize=(12, 10), dpi=300)
 
 ax[0].plot(l2s, "-o")
 ax[1].plot(alignments, "-o")
 ax[2].plot(gam1s, "-o", label="gam1")
 ax[3].plot(gam2s, "-o", label="gam2")
-ax[0].set_ylabel("L2_error(xhat1, x0)")
-ax[1].set_ylabel("Alignment(xhat1, x0)")
+ax[4].plot(lams, "-o", label="lam")
+ax[0].set_ylabel("L2_err(xhat1,x0)")
+ax[1].set_ylabel("Align(xhat1,x0)")
 ax[2].set_ylabel("gam1")
 ax[3].set_ylabel("gam2")
+ax[4].set_ylabel("lam")
 ax[3].set_xlabel("iteration")
 
 fig.tight_layout()

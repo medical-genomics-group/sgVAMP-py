@@ -127,7 +127,7 @@ else:
 
 logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
 
-R = (1-s) * R + s * scipy.sparse.identity(M)
+R = (1-s) * R + s * scipy.sparse.identity(M) # R regularization
 
 if r_fpath.endswith('.txt'):
     r = np.loadtxt(r_fpath).reshape((M,1))
@@ -138,22 +138,24 @@ else:
 
 logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 
-
 # Loading true signals
-if true_signal_fpath==None:
-    x0 = np.array([])
-elif true_signal_fpath.endswith(".bin"):
-    f = open(true_signal_fpath, "rb")
-    buffer = f.read(M * 8)
-    x0 = struct.unpack(str(M)+'d', buffer)
-    x0 = np.array(x0).reshape((M,1))
-    x0 *= np.sqrt(N)
-elif true_signal_fpath.endswith(".npy"):
-    x0 = np.load(true_signal_fpath)
-    x0 *= np.sqrt(N) 
-
-if rank == 0 and len(x0)>0:
-    logging.info(f"True signals loaded. Shape: {x0.shape}\n")
+x0 = np.zeros(M)
+if true_signal_fpath != None:
+    if true_signal_fpath.endswith(".bin"):
+        f = open(true_signal_fpath, "rb")
+        buffer = f.read(M * 8)
+        x0 = struct.unpack(str(M)+'d', buffer)
+        x0 = np.array(x0).reshape((M,1))
+        x0 *= np.sqrt(N)
+    elif true_signal_fpath.endswith(".npy"):
+        x0 = np.load(true_signal_fpath)
+        x0 *= np.sqrt(N) 
+    else:
+        raise Exception("Unsupported true signal format!")
+    if rank == 0:
+        logging.info(f"True signals loaded. Shape: {x0.shape}\n")
+else:
+    x0 = None
 
 a = np.array(N_list) / sum(N_list) # scaling factor for group
 
@@ -192,11 +194,11 @@ te = time.time()
 if rank == 0:
     logging.info(f"sgVAMP total running time: {(te - ts):0.4f}s\n")
 
-# Print metrics
-alignments = []
-l2s = []
+if x0 is not None:
+    # Print metrics
+    alignments = []
+    l2s = []
 
-if len(x0) > 0:
     for it in range(iterations):
         alignment = np.inner(xhat1[it].squeeze(), x0.squeeze()) / np.linalg.norm(xhat1[it].squeeze()) / np.linalg.norm(x0.squeeze())
         alignments.append(alignment)
