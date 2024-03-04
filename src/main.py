@@ -7,7 +7,9 @@ import argparse
 import scipy
 import struct
 import logging
+import pandas as pd
 from mpi4py import MPI
+import os
 
 # Initializing MPI processes
 comm = MPI.COMM_WORLD
@@ -28,7 +30,7 @@ parser.add_argument("-true_signal_file", "--true-signal-file", help = "Path to t
 parser.add_argument("-out_dir", "--out-dir", help = "Output directory")
 parser.add_argument("-out_name", "--out-name", help = "Output file name")
 parser.add_argument("-N", "--N", help = "Number of samples in each cohort, saparated by comma")
-parser.add_argument("-M", "--M", help = "Number of markers")
+parser.add_argument("-M", "--M", help = "Number of markers in each cohort, separated by comma")
 parser.add_argument("-K", "--K", help = "Number of cohorts", default=1)
 parser.add_argument("-L", "--L", help = "Number of prior mixture components", default=2)
 parser.add_argument("-iterations", "--iterations", help = "Number of iterations", default=10)
@@ -43,6 +45,7 @@ parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", defau
 parser.add_argument("-s", "--s",  help = "Rused = (1-s) * R + s * Id", default=0.1)
 parser.add_argument("-prior_update", "--prior-update",  help = "Learning prior probabilites", default=None)
 parser.add_argument("-em_prior_maxit", "--em-prior-maxit",  help = "Maximal number of iterations that prior-learning EM is allowed to perform", default=100)
+parser.add_argument("-snp_files", "--snp-files",  help = "Path to files containing list of snps separated by comma", default=None)
 args = parser.parse_args()
 
 # Input parameters
@@ -51,7 +54,7 @@ r_fpaths = args.r_files
 true_signal_fpath = args.true_signal_file
 out_dir = args.out_dir
 out_name = args.out_name
-M = int(args.M) # Number of markers
+Ms = args.M # Number of markers
 Ns = args.N # Number of samples
 iterations = int(args.iterations)
 K = int(args.K)
@@ -68,11 +71,18 @@ rho = float(args.rho) # damping
 s = float(args.s) # regularization parameter for the correlation matrix
 prior_update = args.prior_update # whether or not to update prior probabilities
 em_prior_maxit = int(args.em_prior_maxit) # prior-learning EM max iterations
+snp_fpaths = args.snp_files
 
 ld_fpaths_list = ld_fpaths.split(",")
 r_fpaths_list = r_fpaths.split(",")
+if snp_fpaths is not None:
+    snp_fpaths_list = snp_fpaths.split(",")
 N_list = [int(n) for n in Ns.split(",")]
+M_list = [int(m) for m in Ms.split(",")]
 N = N_list[rank]
+M = M_list[rank]
+M = max(M_list)
+Mmax_idx = M_list.index(M)
 prior_vars_list = [float(x) for x in prior_vars.split(",")] # variance groups for the prior distribution
 prior_probs_list = [float(x) for x in prior_probs.split(",")] # probability groups for the prior distribution
 
@@ -94,7 +104,7 @@ if rank == 0:
     logging.info(f"--out-dir {out_dir}")
     logging.info(f"--true-signal-file {true_signal_fpath}")
     logging.info(f"--N {Ns}")
-    logging.info(f"--M {M}")
+    logging.info(f"--M {Ms}")
     logging.info(f"--K {K}")
     logging.info(f"--L {L}")
     logging.info(f"--iterations {iterations}")
@@ -109,7 +119,27 @@ if rank == 0:
     logging.info(f"--s {s}")
     logging.info(f"--prior-update {prior_update}")
     if prior_update == "em":
-        logging.info(f"--em_prior_maxit {em_prior_maxit}\n")
+        logging.info(f"--em_prior_maxit {em_prior_maxit}")
+    logging.info(f"--snps-lists {snp_fpaths}\n")
+
+# Loading included SNPs
+mask = np.ones((K,M),dtype=bool)
+f = open(snp_fpaths_list[Mmax_idx], "r")
+snps_all=[]
+for i in range(M):
+    snps_all.append(f.readline().replace("\n",""))
+
+for i, fpath in enumerate(snp_fpaths_list):
+    if i == Mmax_idx: continue
+    snps=[]
+    f=open(snp_fpaths_list[i],"r")
+    for j in range(M_list[rank]):
+        snps.append(f.readline().replace("\n",""))
+
+    snps = [True if x in snps else False for x in snps_all]
+
+    mask[i,:] = np.array(snps)
+#print(mask)
 
 # Loading LD matrix and XTy vector
 if rank == 0:
@@ -119,24 +149,99 @@ ld_fpath = ld_fpaths_list[rank]
 r_fpath = r_fpaths_list[rank]
 
 if ld_fpath.endswith('.npz'):
+    #R = scipy.sparse((M,M))
     R = scipy.sparse.load_npz(ld_fpath)
 elif ld_fpath.endswith('.npy'):
+    #R = np.empty((M,M))
+    #logging.debug(f"Rank {rank} {R.shape} {R[mask][mask].shape} {np.load(ld_fpath).shape}\n")
     R = np.load(ld_fpath)
 else: 
     raise Exception("Unsupported LD matrix format!")
 
 logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
 
+logging.debug(f"Rank {rank} Mmax {M} Mmax_idx{Mmax_idx}\n")
+
+def csr_insert_row(M,x,i):
+    M[i+1:,:] = M[i:-1,:]
+    M[i,:] = x
+    return M
+
+def csr_insert_col(M,x,i):
+    M[:,i+1:] = M[:,i:-1]
+    M[:,i] = x
+    return M
+
+def csr_insert_val(v,x,i):
+    v[i+1:] = v[i:-1]
+    v[i] = x
+    return v
+
+R.resize((M,M))
+# insert empty rows and cols
+for j in range(M):
+    if not mask[rank,j]:
+        csr_insert_row(R,scipy.sparse.csr_matrix((1,M)),j)
+        csr_insert_col(R,scipy.sparse.csr_matrix((M,1)),j)
+# Comunicate missing data
+if rank == Mmax_idx: # this rank has all markers
+    for j in range(M):
+        for k in range(K):
+            if not mask[k,j]:
+                comm.send(R[j,:],k,tag=j)
+                logging.debug(f"Rank {rank} sending tag {j} to cohort {k} data: {R[j,:]}\n")
+for j in range(M):
+    if not mask[rank,j]:
+        x = comm.recv(source=Mmax_idx,tag=j)
+        #R = csr_insert_row(R,x,j)
+        R[j,:] = x
+        logging.debug(f"Rank {rank} recieved tag {j} data: {x}\n")
+
+comm.Barrier()
+
+if rank == Mmax_idx: # this rank has all markers
+    for j in range(M):
+        for k in range(K):
+            if not mask[k,j]:
+                comm.send(R[:,j],k,tag=j)
+                logging.debug(f"Rank {rank} sending tag {j} to cohort {k} data: {R[:,j]}\n")
+for j in range(M):
+    if not mask[rank,j]:
+        x = comm.recv(source=Mmax_idx,tag=j)
+        #R = csr_insert_col(R,x,j)
+        R[:,j] = x
+        logging.debug(f"Rank {rank} recieved tag {j} data: {x}\n")
+
+comm.Barrier()
 R = (1-s) * R + s * scipy.sparse.identity(M) # R regularization
+#logging.debug(f"Rank {rank} {R.shape} {scipy.sparse.identity(M).shape}\n")
 
 if r_fpath.endswith('.txt'):
-    r = np.loadtxt(r_fpath).reshape((M,1))
+    r = np.loadtxt(r_fpath).reshape((M_list[rank],1))
 elif r_fpath.endswith('.npy'):
+    #r = np.empty(M)
     r = np.load(r_fpath)
 else:
     raise Exception("Unsupported XTy vector format!")
 
 logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
+
+r.resize((M))
+
+if rank == Mmax_idx: # this rank has all markers
+    for j in range(M):
+        for k in range(K):
+            if not mask[k,j]:
+                comm.send(r[j],k,tag=j)
+                logging.debug(f"Rank {rank} sending tag {j} to cohort {k} data: {r[j]}\n")
+for j in range(M):
+    if not mask[rank,j]:
+        x = comm.recv(source=Mmax_idx,tag=j)
+        r = csr_insert_val(r,x,j)
+        logging.debug(f"Rank {rank} recieved tag {j} data: {x}\n")
+
+scipy.sparse.save_npz("%s_rank_%d_R.npz" % (os.path.join(out_dir,out_name), rank), R) # save simulated ld matrix
+np.save("%s_rank_%d_r.npy" % (os.path.join(out_dir,out_name), rank), r) # save XTy vector
 
 # Loading true signals
 x0 = np.zeros(M)
@@ -166,7 +271,7 @@ sgvamp = VAMP(  N=N,
                 rho=rho, 
                 gam1=gam1, 
                 gamw=gamw,
-                a=a, 
+                a=a,
                 prior_vars=prior_vars_list, 
                 prior_probs=prior_probs_list, 
                 out_dir=out_dir, 
