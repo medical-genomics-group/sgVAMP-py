@@ -172,13 +172,14 @@ r = np.zeros(M)
 if r_fpath.endswith('.txt'):
     r_k = np.loadtxt(r_fpath).reshape((M_list[rank]))
 elif r_fpath.endswith('.npy'):
-    r_k = np.load(r_fpath)
+    r_k = np.load(r_fpath).reshape((M_list[rank]))
 else:
     raise Exception("Unsupported XTy vector format!")
 
 # Reorder r vector based on reference
 for j in range(len(r_k)):
     r[i_map[j]] = r_k[j]
+del r_k
 
 if ld_fpath.endswith('.npz'):
     R = scipy.sparse.load_npz(ld_fpath)
@@ -190,6 +191,7 @@ elif ld_fpath.endswith('.ld'):
     indA = [idx[rs] for rs in list(R_df['SNP_A'])] # Index SNPs by reference
     indB = [idx[rs] for rs in list(R_df['SNP_B'])]
     R_col = list(R_df['R']) # Correlation values
+    del R_df
 
     # Send requests
     for k in range(K):
@@ -239,7 +241,9 @@ elif ld_fpath.endswith('.ld'):
     v = np.array(list(np.ones(M)) + R_col + R_col)
     del R_col
     R = scipy.sparse.csr_matrix((v, (ind_r, ind_c)), shape=(M, M))
-    
+    del v
+    del ind_r
+    del ind_c   
 else: 
     raise Exception("Unsupported LD matrix format!")
 
@@ -247,6 +251,7 @@ logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
 
 R = (1-s) * R + s * scipy.sparse.identity(M) # R regularization
 
+r = r.reshape((M,1))
 logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 
 # Loading true signals
