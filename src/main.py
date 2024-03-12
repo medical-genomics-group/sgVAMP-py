@@ -131,7 +131,7 @@ for k in range(K):
     if k == 0:
         bim_ref_df = bim_df
     else:
-        bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Chromosome','Variant','Position','Coordinate','Allele1','Allele2'], how='outer')
+        bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Chromosome','Variant','Position','Coordinate'], how='outer')
 
 bim_ref_df.sort_values(by=['Coordinate'])
 #bim_ref.sort()
@@ -143,7 +143,7 @@ if rank == 0:
 
 if rank == 0:
     logging.info(f"...Saving refenrence .bim file \n")
-    bim_ref_df.to_csv(os.path.join(out_dir,out_name + ".bim"), header=None, sep='\t', index=False)
+    bim_ref_df.iloc[:,:6].to_csv(os.path.join(out_dir, out_name + ".bim"), header=None, sep='\t', index=False)
 
 rs_miss = list(set(bim_ref) - set(bim_list[rank]))
 #mask = [False if rs in rs_miss else True for rs in bim_ref]
