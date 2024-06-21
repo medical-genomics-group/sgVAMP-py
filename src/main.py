@@ -9,6 +9,7 @@ import struct
 import logging
 from mpi4py import MPI
 import pandas as pd
+#import dask.dataframe as dd
 import os
 
 # Initializing MPI processes
@@ -80,6 +81,7 @@ bim_fpaths_list = bim_fpaths.split(',')
 N_list = [int(n) for n in Ns.split(",")]
 M_list = [int(m) for m in Ms.split(",")]
 N = N_list[rank]
+Nt = sum(N_list)
 prior_vars_list = [float(x) for x in prior_vars.split(",")] # variance groups for the prior distribution
 prior_probs_list = [float(x) for x in prior_probs.split(",")] # probability groups for the prior distribution
 
@@ -121,20 +123,18 @@ if rank == 0:
 # Loading .bim files
 if rank == 0:
     logging.info(f"...loading .bim files\n")
-
+ts = time.time()
 bim_ref = []
 bim_list = []
 for k in range(K):
     bim_df = pd.read_table(bim_fpaths_list[k], sep='\s+', header=None, names=['Chromosome','Variant','Position','Coordinate','Allele1','Allele2'])
     bim_list.append(list(bim_df['Variant']))
-    #bim_ref = list(set(bim_ref) | set(list(bim_df['a1'])))
     if k == 0:
         bim_ref_df = bim_df
     else:
         bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Chromosome','Variant','Position','Coordinate'], how='outer')
 
-bim_ref_df.sort_values(by=['Coordinate'])
-#bim_ref.sort()
+bim_ref_df = bim_ref_df.sort_values(by=['Coordinate'])
 bim_ref = list(bim_ref_df['Variant'])
 M = len(bim_ref)
 
@@ -146,9 +146,7 @@ if rank == 0:
     bim_ref_df.iloc[:,:6].to_csv(os.path.join(out_dir, out_name + ".bim"), header=None, sep='\t', index=False)
 
 rs_miss = list(set(bim_ref) - set(bim_list[rank]))
-#mask = [False if rs in rs_miss else True for rs in bim_ref]
 idx = {rs:i for i,rs in enumerate(bim_ref)} # for storing SNP reference index
-#idx_miss = [idx[rs] for rs in rs_miss]
 i_map = [idx[rs] for i,rs in enumerate(bim_list[rank])] # for maping SNP indices oiginal - reference
 
 source = np.ones(M) * rank # Vector of rank indices indicating where to ask for missing data
@@ -160,6 +158,7 @@ for rs in rs_miss:
                 idx_rs.append(k)
     kx = np.argmax(np.array(N_list)[idx_rs])
     source[idx[rs]] = kx
+logging.debug(f"Rank {rank}: Handling .bim file took {time.time() - ts} seconds \n")
 
 # Loading LD matrix and XTy vector
 if rank == 0:
@@ -186,13 +185,20 @@ if ld_fpath.endswith('.npz'):
 elif ld_fpath.endswith('.npy'):
     R = np.load(ld_fpath)
 elif ld_fpath.endswith('.ld'):
-
+    ts = time.time()
     R_df = pd.read_table(ld_fpath, sep='\s+') # Load .ld file
-    indA = [idx[rs] for rs in list(R_df['SNP_A'])] # Index SNPs by reference
-    indB = [idx[rs] for rs in list(R_df['SNP_B'])]
-    R_col = list(R_df['R']) # Correlation values
-    del R_df
+    logging.debug(f"Rank {rank}: Loading data frame took {time.time() - ts} seconds \n")
 
+    ts = time.time()
+    indA_df = pd.DataFrame({"ind_A": np.arange(0,M)}, index=bim_ref)
+    indB_df = pd.DataFrame({"ind_B": np.arange(0,M)}, index=bim_ref)
+    R_df = pd.merge(R_df, indA_df, left_on='SNP_A', right_index=True)
+    R_df = pd.merge(R_df, indB_df, left_on='SNP_B', right_index=True)
+    del indA_df, indB_df
+    logging.debug(f"Rank {rank}: Indexing columns took {time.time() - ts} seconds \n")
+
+    ts = time.time()
+    
     # Send requests
     for k in range(K):
         if k != rank:
@@ -211,8 +217,11 @@ elif ld_fpath.endswith('.ld'):
             data = []
             for ind in req_set[k]:
                 for i,corr in enumerate(R_col):
-                    if indA[i] == ind or indB[i] == ind:
-                        data.append([indA[i], indB[i], corr])
+                    if R_df['ind_A'][i] == ind or R_df['ind_B'][i] == ind:
+                        ind_A_i = R_df['ind_A'][i]
+                        ind_B_i = R_df['ind_B'][i]
+                        R_i = R_df['R'][i]
+                        data.append([ind_A_i, ind_B_i, R_i])
             comm.send(np.array(data), k, tag=1) # sending R data
             #logging.debug(f"Rank {rank} sended R data {data}\n")
             data = r[req_set[k]] 
@@ -226,24 +235,26 @@ elif ld_fpath.endswith('.ld'):
                 data = comm.recv(source=k, tag=1)
                 #logging.debug(f"Rank {rank} recived data {data}\n")
                 for i in range(data.shape[0]):
-                    indA.append(data[i,0])
-                    indB.append(data[i,1])
-                    R_col.append(data[i,2])
-
+                    ind_A_i = data[i,0]
+                    ind_B_i = data[i,1]
+                    R_i = data[i,2]
+                    SNP_A_i = bim_ref[ind_A_i]
+                    SNP_B_i = bim_ref[ind_B_i]
+                    R_df.append({'SNP_A': SNP_A_i, 'SNP_B': SNP_B_i, 'R': R_i, 'ind_A': ind_A_i, 'ind_B': ind_B_i}, ignore_index=True)
                 data = comm.recv(source=k, tag=2)
                 #logging.debug(f"Rank {rank} recieved r data {data}\n")
                 r[source == k] = data
 
-    ind_r = list(range(M)) + indA + indB
-    ind_c = list(range(M)) + indB + indA
-    del indA
-    del indB
-    v = np.array(list(np.ones(M)) + R_col + R_col)
-    del R_col
-    R = scipy.sparse.csr_matrix((v, (ind_r, ind_c)), shape=(M, M))
-    del v
-    del ind_r
-    del ind_c   
+    logging.debug(f"Rank {rank}: Comunicating data took {time.time() - ts} seconds \n")
+
+    ts = time.time()
+
+    R = scipy.sparse.csr_matrix((np.concatenate([np.ones(M), R_df['R'].values, R_df['R'].values]), 
+                                (np.concatenate([np.arange(0,M), R_df['ind_A'].values, R_df['ind_B'].values]), 
+                                np.concatenate([np.arange(0,M), R_df['ind_B'].values, R_df['ind_A'].values]))), 
+                                shape=(M, M))
+    del R_df
+    logging.debug(f"Rank {rank}: Creating sparse matrix took {time.time() - ts} seconds \n")
 else: 
     raise Exception("Unsupported LD matrix format!")
 
@@ -277,6 +288,7 @@ a = np.array(N_list) / sum(N_list) # scaling factor for group
 
 # multi-cohort sgVAMP init
 sgvamp = VAMP(  N=N,
+                Nt=Nt,
                 M=M,
                 K=K,
                 rho=rho, 
