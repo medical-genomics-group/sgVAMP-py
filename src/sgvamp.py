@@ -12,9 +12,10 @@ import struct
 import logging
 
 class VAMP:
-    def __init__(self, N, M, K, rho, gamw, gam1, a, prior_vars, prior_probs, out_dir, out_name, comm):
+    def __init__(self, N, Nt, M, K, rho, gamw, gam1, a, prior_vars, prior_probs, out_dir, out_name, comm):
         self.eps = 1e-32
         self.N = N
+        self.Nt = Nt
         self.M = M
         self.K = K
         self.L = len(prior_probs)
@@ -23,7 +24,7 @@ class VAMP:
         self.gam1 = gam1 #np.full(K, gam1)
         self.a = a
         self.lam = 1 - prior_probs[0]
-        self.sigmas = np.array(prior_vars[1:]) * N # a vector containing variances of different groups except the first one, length = L-1
+        self.sigmas = np.array(prior_vars[1:]) * Nt # a vector containing variances of different groups except the first one, length = L-1
         self.omegas = np.array([ p / sum(prior_probs[1:]) for p in prior_probs[1:]])
         self.setup_io(out_dir, out_name)
         self.comm = comm
@@ -190,6 +191,7 @@ class VAMP:
         # Initialization
         M = self.M
         N = self.N
+        Nt = self.Nt
         rank = self.comm.Get_rank()
         r = r.reshape((M,1))
         r1 = r.reshape((M,1))
@@ -269,7 +271,7 @@ class VAMP:
             xhat1s.append(xhat1)
             
             if rank == 0:
-                self.write_xhat_to_file(it, xhat1 / np.sqrt(N))
+                self.write_xhat_to_file(it, xhat1 / np.sqrt(Nt))
 
             alpha1 = np.mean(np.array([self.der_denoiser_meta(r1s[:,j], gam1s) for j in range(M)]))
             # delta = 1 - np.log(2*alpha1)

@@ -8,6 +8,9 @@ import scipy
 import struct
 import logging
 from mpi4py import MPI
+import pandas as pd
+#import dask.dataframe as dd
+import os
 
 # Initializing MPI processes
 comm = MPI.COMM_WORLD
@@ -28,7 +31,7 @@ parser.add_argument("-true_signal_file", "--true-signal-file", help = "Path to t
 parser.add_argument("-out_dir", "--out-dir", help = "Output directory")
 parser.add_argument("-out_name", "--out-name", help = "Output file name")
 parser.add_argument("-N", "--N", help = "Number of samples in each cohort, saparated by comma")
-parser.add_argument("-M", "--M", help = "Number of markers")
+parser.add_argument("-M", "--M", help = "Number of markers in each cohort, separated by comma")
 parser.add_argument("-K", "--K", help = "Number of cohorts", default=1)
 parser.add_argument("-L", "--L", help = "Number of prior mixture components", default=2)
 parser.add_argument("-iterations", "--iterations", help = "Number of iterations", default=10)
@@ -43,6 +46,7 @@ parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", defau
 parser.add_argument("-s", "--s",  help = "Rused = (1-s) * R + s * Id", default=0.1)
 parser.add_argument("-prior_update", "--prior-update",  help = "Learning prior probabilites", default=None)
 parser.add_argument("-em_prior_maxit", "--em-prior-maxit",  help = "Maximal number of iterations that prior-learning EM is allowed to perform", default=100)
+parser.add_argument("-bim_files", "--bim-files",  help = "Path to files containing list of snps", default=None)
 args = parser.parse_args()
 
 # Input parameters
@@ -51,7 +55,7 @@ r_fpaths = args.r_files
 true_signal_fpath = args.true_signal_file
 out_dir = args.out_dir
 out_name = args.out_name
-M = int(args.M) # Number of markers
+Ms = args.M # Number of markers
 Ns = args.N # Number of samples
 iterations = int(args.iterations)
 K = int(args.K)
@@ -68,14 +72,18 @@ rho = float(args.rho) # damping
 s = float(args.s) # regularization parameter for the correlation matrix
 prior_update = args.prior_update # whether or not to update prior probabilities
 em_prior_maxit = int(args.em_prior_maxit) # prior-learning EM max iterations
+bim_fpaths = args.bim_files
 
 ld_fpaths_list = ld_fpaths.split(",")
 r_fpaths_list = r_fpaths.split(",")
+bim_fpaths_list = bim_fpaths.split(',')
+
 N_list = [int(n) for n in Ns.split(",")]
+M_list = [int(m) for m in Ms.split(",")]
 N = N_list[rank]
+Nt = sum(N_list)
 prior_vars_list = [float(x) for x in prior_vars.split(",")] # variance groups for the prior distribution
 prior_probs_list = [float(x) for x in prior_probs.split(",")] # probability groups for the prior distribution
-
 
 if len(ld_fpaths_list) != K:
     raise Exception("Specified number of cohorts is not equal to number of LD matrices provided!")
@@ -94,7 +102,7 @@ if rank == 0:
     logging.info(f"--out-dir {out_dir}")
     logging.info(f"--true-signal-file {true_signal_fpath}")
     logging.info(f"--N {Ns}")
-    logging.info(f"--M {M}")
+    logging.info(f"--M {Ms}")
     logging.info(f"--K {K}")
     logging.info(f"--L {L}")
     logging.info(f"--iterations {iterations}")
@@ -109,7 +117,48 @@ if rank == 0:
     logging.info(f"--s {s}")
     logging.info(f"--prior-update {prior_update}")
     if prior_update == "em":
-        logging.info(f"--em_prior_maxit {em_prior_maxit}\n")
+        logging.info(f"--em_prior_maxit {em_prior_maxit}")
+    logging.info(f"--bim-files {bim_fpaths}\n")
+
+# Loading .bim files
+if rank == 0:
+    logging.info(f"...loading .bim files\n")
+ts = time.time()
+bim_ref = []
+bim_list = []
+for k in range(K):
+    bim_df = pd.read_table(bim_fpaths_list[k], sep='\s+', header=None, names=['Chromosome','Variant','Position','Coordinate','Allele1','Allele2'])
+    bim_list.append(list(bim_df['Variant']))
+    if k == 0:
+        bim_ref_df = bim_df
+    else:
+        bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Chromosome','Variant','Position','Coordinate'], how='outer')
+
+bim_ref_df = bim_ref_df.sort_values(by=['Coordinate'])
+bim_ref = list(bim_ref_df['Variant'])
+M = len(bim_ref)
+
+if rank == 0:
+    logging.info(f"Total number of markers in reference is {M} \n")
+
+if rank == 0:
+    logging.info(f"...Saving refenrence .bim file \n")
+    bim_ref_df.iloc[:,:6].to_csv(os.path.join(out_dir, out_name + ".bim"), header=None, sep='\t', index=False)
+
+rs_miss = list(set(bim_ref) - set(bim_list[rank]))
+idx = {rs:i for i,rs in enumerate(bim_ref)} # for storing SNP reference index
+i_map = [idx[rs] for i,rs in enumerate(bim_list[rank])] # for maping SNP indices oiginal - reference
+
+source = np.ones(M) * rank # Vector of rank indices indicating where to ask for missing data
+for rs in rs_miss:
+    idx_rs = []
+    for k in range(K):
+        if k != rank:
+            if rs in bim_list[k]:
+                idx_rs.append(k)
+    kx = np.argmax(np.array(N_list)[idx_rs])
+    source[idx[rs]] = kx
+logging.debug(f"Rank {rank}: Handling .bim file took {time.time() - ts} seconds \n")
 
 # Loading LD matrix and XTy vector
 if rank == 0:
@@ -118,10 +167,94 @@ if rank == 0:
 ld_fpath = ld_fpaths_list[rank]
 r_fpath = r_fpaths_list[rank]
 
+r = np.zeros(M)
+if r_fpath.endswith('.txt'):
+    r_k = np.loadtxt(r_fpath).reshape((M_list[rank]))
+elif r_fpath.endswith('.npy'):
+    r_k = np.load(r_fpath).reshape((M_list[rank]))
+else:
+    raise Exception("Unsupported XTy vector format!")
+
+# Reorder r vector based on reference
+for j in range(len(r_k)):
+    r[i_map[j]] = r_k[j]
+del r_k
+
 if ld_fpath.endswith('.npz'):
     R = scipy.sparse.load_npz(ld_fpath)
 elif ld_fpath.endswith('.npy'):
     R = np.load(ld_fpath)
+elif ld_fpath.endswith('.ld'):
+    ts = time.time()
+    R_df = pd.read_table(ld_fpath, sep='\s+') # Load .ld file
+    logging.debug(f"Rank {rank}: Loading data frame took {time.time() - ts} seconds \n")
+
+    ts = time.time()
+    indA_df = pd.DataFrame({"ind_A": np.arange(0,M)}, index=bim_ref)
+    indB_df = pd.DataFrame({"ind_B": np.arange(0,M)}, index=bim_ref)
+    R_df = pd.merge(R_df, indA_df, left_on='SNP_A', right_index=True)
+    R_df = pd.merge(R_df, indB_df, left_on='SNP_B', right_index=True)
+    del indA_df, indB_df
+    logging.debug(f"Rank {rank}: Indexing columns took {time.time() - ts} seconds \n")
+
+    ts = time.time()
+    
+    # Send requests
+    for k in range(K):
+        if k != rank:
+            i_list = [i for i in range(len(source)) if source[i] == k]
+            comm.send(i_list, k, tag=0)
+    
+    # receive requests
+    req_set = {}
+    for k in range(K):
+        if k != rank:
+            req_set[k] = comm.recv(source=k, tag=0)
+    
+    # Send data
+    for k in range(K):
+        if k != rank:
+            data = []
+            for ind in req_set[k]:
+                for i,corr in enumerate(R_col):
+                    if R_df['ind_A'][i] == ind or R_df['ind_B'][i] == ind:
+                        ind_A_i = R_df['ind_A'][i]
+                        ind_B_i = R_df['ind_B'][i]
+                        R_i = R_df['R'][i]
+                        data.append([ind_A_i, ind_B_i, R_i])
+            comm.send(np.array(data), k, tag=1) # sending R data
+            #logging.debug(f"Rank {rank} sended R data {data}\n")
+            data = r[req_set[k]] 
+            comm.send(data, k, tag=2) # sending r vector
+            #logging.debug(f"Rank {rank} sended r data {data}\n")
+
+    # receive data
+    for k in range(K):
+        if k != rank:
+            if k in source:
+                data = comm.recv(source=k, tag=1)
+                #logging.debug(f"Rank {rank} recived data {data}\n")
+                for i in range(data.shape[0]):
+                    ind_A_i = data[i,0]
+                    ind_B_i = data[i,1]
+                    R_i = data[i,2]
+                    SNP_A_i = bim_ref[ind_A_i]
+                    SNP_B_i = bim_ref[ind_B_i]
+                    R_df.append({'SNP_A': SNP_A_i, 'SNP_B': SNP_B_i, 'R': R_i, 'ind_A': ind_A_i, 'ind_B': ind_B_i}, ignore_index=True)
+                data = comm.recv(source=k, tag=2)
+                #logging.debug(f"Rank {rank} recieved r data {data}\n")
+                r[source == k] = data
+
+    logging.debug(f"Rank {rank}: Comunicating data took {time.time() - ts} seconds \n")
+
+    ts = time.time()
+
+    R = scipy.sparse.csr_matrix((np.concatenate([np.ones(M), R_df['R'].values, R_df['R'].values]), 
+                                (np.concatenate([np.arange(0,M), R_df['ind_A'].values, R_df['ind_B'].values]), 
+                                np.concatenate([np.arange(0,M), R_df['ind_B'].values, R_df['ind_A'].values]))), 
+                                shape=(M, M))
+    del R_df
+    logging.debug(f"Rank {rank}: Creating sparse matrix took {time.time() - ts} seconds \n")
 else: 
     raise Exception("Unsupported LD matrix format!")
 
@@ -129,13 +262,7 @@ logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
 
 R = (1-s) * R + s * scipy.sparse.identity(M) # R regularization
 
-if r_fpath.endswith('.txt'):
-    r = np.loadtxt(r_fpath).reshape((M,1))
-elif r_fpath.endswith('.npy'):
-    r = np.load(r_fpath)
-else:
-    raise Exception("Unsupported XTy vector format!")
-
+r = r.reshape((M,1))
 logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 
 # Loading true signals
@@ -161,6 +288,7 @@ a = np.array(N_list) / sum(N_list) # scaling factor for group
 
 # multi-cohort sgVAMP init
 sgvamp = VAMP(  N=N,
+                Nt=Nt,
                 M=M,
                 K=K,
                 rho=rho, 
