@@ -68,6 +68,13 @@ class VAMP:
         f.write(struct.pack(str(len(xhat))+'d', *xhat.squeeze()))
         f.close()
 
+    def write_r1_to_file(self, it, r1, k):
+        # Setup output binary file for r1 vector
+        fname = "%s_r1_cohort_%d_it_%d.bin" % (self.out_name, k, it)
+        f = open(os.path.join(self.out_dir, fname), "wb")
+        f.write(struct.pack(str(len(r1))+'d', *r1.squeeze()))
+        f.close()
+
     def denoiser(self, r, gam1): # not numerically stable! AD
         A = (1-self.lam) * norm.pdf(r, loc=0, scale=np.sqrt(1.0/gam1))
         B = self.lam * norm.pdf(r, loc=0, scale=np.sqrt(self.sigmas + 1.0/gam1))
@@ -272,6 +279,8 @@ class VAMP:
             
             if rank == 0:
                 self.write_xhat_to_file(it, xhat1 / np.sqrt(Nt))
+            
+            self.write_r1_to_file(it, r1 / np.sqrt(Nt), rank + 1)
 
             alpha1 = np.mean(np.array([self.der_denoiser_meta(r1s[:,j], gam1s) for j in range(M)]))
             # delta = 1 - np.log(2*alpha1)
