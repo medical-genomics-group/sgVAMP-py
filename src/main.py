@@ -132,7 +132,8 @@ for k in range(K):
     if k == 0:
         bim_ref_df = bim_df
     else:
-        bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Chromosome','Variant','Position','Coordinate'], how='outer')
+        #bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Chromosome','Variant','Position','Coordinate'], how='outer')
+        bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Variant'], how='outer', suffixes=('', '_y'))
 
 bim_ref_df = bim_ref_df.sort_values(by=['Coordinate'])
 bim_ref = list(bim_ref_df['Variant'])
@@ -172,6 +173,11 @@ if r_fpath.endswith('.txt'):
     r_k = np.loadtxt(r_fpath).reshape((M_list[rank]))
 elif r_fpath.endswith('.npy'):
     r_k = np.load(r_fpath).reshape((M_list[rank]))
+elif r_fpath.endswith('.linear'):
+    df_r_k = pd.read_table(r_fpath, sep='\s+')
+    r_k = np.array(df_r_k['BETA']).reshape((M_list[rank]))
+    r_k[np.isnan(r_k)] = 0
+    r_k *= np.sqrt(N)
 else:
     raise Exception("Unsupported XTy vector format!")
 
