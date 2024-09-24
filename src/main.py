@@ -161,9 +161,11 @@ for rs in rs_miss:
     source[idx[rs]] = kx
 logging.debug(f"Rank {rank}: Handling .bim file took {time.time() - ts} seconds \n")
 
-# Loading LD matrix and XTy vector
+# Loading R matrix and r vector
 if rank == 0:
-    logging.info(f"...loading LD matrix and XTy vector\n")
+    logging.info(f"...loading R matrix and r vector\n")
+
+ts = time.time()
 
 ld_fpath = ld_fpaths_list[rank]
 r_fpath = r_fpaths_list[rank]
@@ -179,11 +181,17 @@ elif r_fpath.endswith('.linear'):
     r_k[np.isnan(r_k)] = 0
     r_k *= np.sqrt(N)
 else:
-    raise Exception("Unsupported XTy vector format!")
+    raise Exception("Unsupported r vector format!")
 
 # Reorder r vector based on reference
 for j in range(len(r_k)):
     r[i_map[j]] = r_k[j]
+
+logging.info(f"Rank {rank} loaded r vector with shape {r.shape}\n")
+logging.debug(f"Rank {rank}: Loading r vector took {time.time() - ts} seconds \n")
+
+# Loading R matrix
+ts = time.time()
 
 if ld_fpath.endswith('.npz'):
     R = scipy.sparse.load_npz(ld_fpath)
@@ -246,13 +254,13 @@ elif ld_fpath.endswith('.ld'):
     R = scipy.sparse.csr_matrix((v, (ind_r, ind_c)), shape=(M, M))
     
 else: 
-    raise Exception("Unsupported LD matrix format!")
+    raise Exception("Unsupported R matrix format!")
 
-logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
+logging.info(f"Rank {rank} loaded R matrix with shape {R.shape}\n")
+logging.debug(f"Rank {rank}: Loading R matrix took {time.time() - ts} seconds \n")
 
 R = (1-s) * R + s * scipy.sparse.identity(M) # R regularization
 r = r.reshape((M,1))
-logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 
 # Loading true signals
 x0 = np.zeros(M)
@@ -309,7 +317,7 @@ te = time.time()
 
 # Print running time
 if rank == 0:
-    logging.info(f"sgVAMP total running time: {(te - ts):0.4f}s\n")
+    logging.info(f"sgVAMP inference running time: {(te - ts):0.4f}s\n")
 
 if x0 is not None:
     # Print metrics
