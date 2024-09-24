@@ -44,7 +44,8 @@ parser.add_argument("-learn_gamw", "--learn-gamw", help = "Learn or fix gamw", d
 parser.add_argument("-rho", "--rho", help = "Damping factor rho", default=0.5)
 parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", default=500)
 parser.add_argument("-s", "--s",  help = "Rused = (1-s) * R + s * Id", default=0.0)
-parser.add_argument("-prior_update", "--prior-update",  help = "Learning prior probabilites", default="em")
+parser.add_argument("-prior_update", "--prior-update",  help = "Learning prior probabilities", default="em")
+parser.add_argument("-update_prior_from", "--update-prior-from",  help = "Learn prior probabilities from specific iteration onwards", default=1)
 parser.add_argument("-em_prior_maxit", "--em-prior-maxit",  help = "Maximal number of iterations that prior-learning EM is allowed to perform", default=100)
 parser.add_argument("-bim_files", "--bim-files",  help = "Path to files containing list of snps", default=None)
 args = parser.parse_args()
@@ -71,6 +72,7 @@ cg_maxit = int(args.cg_maxit) # CG max iterations
 rho = float(args.rho) # damping
 s = float(args.s) # regularization parameter for the correlation matrix
 prior_update = args.prior_update # whether or not to update prior probabilities
+update_prior_from = int(args.update_prior_from) # Skip some iterations when learning prior
 em_prior_maxit = int(args.em_prior_maxit) # prior-learning EM max iterations
 bim_fpaths = args.bim_files
 
@@ -116,6 +118,7 @@ if rank == 0:
     logging.info(f"--cg-maxit {cg_maxit}")
     logging.info(f"--s {s}")
     logging.info(f"--prior-update {prior_update}")
+    logging.info(f"--update-prior-from {update_prior_from}")
     if prior_update == "em":
         logging.info(f"--em_prior_maxit {em_prior_maxit}")
     logging.info(f"--bim-files {bim_fpaths}\n")
@@ -312,7 +315,8 @@ xhat1 = sgvamp.infer(   R,
                         em_prior_maxit = em_prior_maxit,
                         learn_gamw=learn_gamw, 
                         lmmse_damp=lmmse_damp,
-                        prior_update=prior_update)
+                        prior_update=prior_update,
+                        update_prior_from=update_prior_from)
 te = time.time()
 
 # Print running time
