@@ -193,7 +193,7 @@ class VAMP:
             self.omegas = np.array([ w / sum(x[1:-1]) for w in x[1:-1]])
             self.gam = x[self.L]
 
-    def infer(self,R,r,iterations, x0, cg_maxit=500, em_prior_maxit=100, learn_gamw=True, lmmse_damp=True, prior_update=None):
+    def infer(self,R,r,iterations, x0, cg_maxit=500, em_prior_maxit=100, learn_gamw=True, lmmse_damp=True, prior_update=None, update_prior_from=1):
 
         # Initialization
         M = self.M
@@ -239,7 +239,7 @@ class VAMP:
                 logging.info(f"...Data from all ranks collected")
 
             # Update prior
-            if it > 0: 
+            if it >= update_prior_from: 
                 if prior_update == "mle":
                     if rank == 0:
                         logging.info("...Updating prior parameters using MLE")
