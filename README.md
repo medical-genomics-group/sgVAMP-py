@@ -35,6 +35,7 @@ python3 ${sloc}/main.py [Input options]
 | `--cg-maxit` | CG max iterations |
 | `--s` | Rused = (1-s) * R + s * Id |
 | `--mle-prior-update` | Updating prior probabilities using MLE ('mle') or EM ('em') |
+| `--update-prior-from` | Updating prior probabilities from specific iteration onwards |
 | `--em-prior-maxit` | Maximal number of iterations that prior-learning EM is allowed to perform |
 
 # Output files

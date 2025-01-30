@@ -44,7 +44,8 @@ parser.add_argument("-learn_gamw", "--learn-gamw", help = "Learn or fix gamw", d
 parser.add_argument("-rho", "--rho", help = "Damping factor rho", default=0.5)
 parser.add_argument("-cg_maxit", "--cg-maxit", help = "CG max iterations", default=500)
 parser.add_argument("-s", "--s",  help = "Rused = (1-s) * R + s * Id", default=0.0)
-parser.add_argument("-prior_update", "--prior-update",  help = "Learning prior probabilites", default="em")
+parser.add_argument("-prior_update", "--prior-update",  help = "Learning prior probabilities", default="em")
+parser.add_argument("-update_prior_from", "--update-prior-from",  help = "Learn prior probabilities from specific iteration onwards", default=1)
 parser.add_argument("-em_prior_maxit", "--em-prior-maxit",  help = "Maximal number of iterations that prior-learning EM is allowed to perform", default=100)
 parser.add_argument("-bim_files", "--bim-files",  help = "Path to files containing list of snps", default=None)
 args = parser.parse_args()
@@ -71,6 +72,7 @@ cg_maxit = int(args.cg_maxit) # CG max iterations
 rho = float(args.rho) # damping
 s = float(args.s) # regularization parameter for the correlation matrix
 prior_update = args.prior_update # whether or not to update prior probabilities
+update_prior_from = int(args.update_prior_from) # Skip some iterations when learning prior
 em_prior_maxit = int(args.em_prior_maxit) # prior-learning EM max iterations
 bim_fpaths = args.bim_files
 
@@ -116,6 +118,7 @@ if rank == 0:
     logging.info(f"--cg-maxit {cg_maxit}")
     logging.info(f"--s {s}")
     logging.info(f"--prior-update {prior_update}")
+    logging.info(f"--update-prior-from {update_prior_from}")
     if prior_update == "em":
         logging.info(f"--em_prior_maxit {em_prior_maxit}")
     logging.info(f"--bim-files {bim_fpaths}\n")
@@ -132,7 +135,8 @@ for k in range(K):
     if k == 0:
         bim_ref_df = bim_df
     else:
-        bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Chromosome','Variant','Position','Coordinate'], how='outer')
+        #bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Chromosome','Variant','Position','Coordinate'], how='outer')
+        bim_ref_df = pd.merge(bim_ref_df, bim_df, on=['Variant'], how='outer', suffixes=('', '_y'))
 
 bim_ref_df = bim_ref_df.sort_values(by=['Coordinate'])
 bim_ref = list(bim_ref_df['Variant'])
@@ -160,9 +164,11 @@ for rs in rs_miss:
     source[idx[rs]] = kx
 logging.debug(f"Rank {rank}: Handling .bim file took {time.time() - ts} seconds \n")
 
-# Loading LD matrix and XTy vector
+# Loading R matrix and r vector
 if rank == 0:
-    logging.info(f"...loading LD matrix and XTy vector\n")
+    logging.info(f"...loading R matrix and r vector\n")
+
+ts = time.time()
 
 ld_fpath = ld_fpaths_list[rank]
 r_fpath = r_fpaths_list[rank]
@@ -172,12 +178,23 @@ if r_fpath.endswith('.txt'):
     r_k = np.loadtxt(r_fpath).reshape((M_list[rank]))
 elif r_fpath.endswith('.npy'):
     r_k = np.load(r_fpath).reshape((M_list[rank]))
+elif r_fpath.endswith('.linear'):
+    df_r_k = pd.read_table(r_fpath, sep='\s+')
+    r_k = np.array(df_r_k['BETA']).reshape((M_list[rank]))
+    r_k[np.isnan(r_k)] = 0
+    r_k *= np.sqrt(N)
 else:
-    raise Exception("Unsupported XTy vector format!")
+    raise Exception("Unsupported r vector format!")
 
 # Reorder r vector based on reference
 for j in range(len(r_k)):
     r[i_map[j]] = r_k[j]
+
+logging.info(f"Rank {rank} loaded r vector with shape {r.shape}\n")
+logging.debug(f"Rank {rank}: Loading r vector took {time.time() - ts} seconds \n")
+
+# Loading R matrix
+ts = time.time()
 
 if ld_fpath.endswith('.npz'):
     R = scipy.sparse.load_npz(ld_fpath)
@@ -240,13 +257,13 @@ elif ld_fpath.endswith('.ld'):
     R = scipy.sparse.csr_matrix((v, (ind_r, ind_c)), shape=(M, M))
     
 else: 
-    raise Exception("Unsupported LD matrix format!")
+    raise Exception("Unsupported R matrix format!")
 
-logging.info(f"Rank {rank} loaded LD matrix with shape {R.shape}\n")
+logging.info(f"Rank {rank} loaded R matrix with shape {R.shape}\n")
+logging.debug(f"Rank {rank}: Loading R matrix took {time.time() - ts} seconds \n")
 
 R = (1-s) * R + s * scipy.sparse.identity(M) # R regularization
 r = r.reshape((M,1))
-logging.info(f"Rank {rank} loaded XTy vector with shape {r.shape}\n")
 
 # Loading true signals
 x0 = np.zeros(M)
@@ -298,12 +315,13 @@ xhat1 = sgvamp.infer(   R,
                         em_prior_maxit = em_prior_maxit,
                         learn_gamw=learn_gamw, 
                         lmmse_damp=lmmse_damp,
-                        prior_update=prior_update)
+                        prior_update=prior_update,
+                        update_prior_from=update_prior_from)
 te = time.time()
 
 # Print running time
 if rank == 0:
-    logging.info(f"sgVAMP total running time: {(te - ts):0.4f}s\n")
+    logging.info(f"sgVAMP inference running time: {(te - ts):0.4f}s\n")
 
 if x0 is not None:
     # Print metrics
